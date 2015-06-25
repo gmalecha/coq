@@ -301,11 +301,6 @@ let print_style_tags () =
   let () = List.iter iter tags in
   flush_all ()
 
-let error_missing_arg s =
-  prerr_endline ("Error: extra argument expected after option "^s);
-  prerr_endline "See -help for the syntax of supported options";
-  exit 1
-
 let filter_opts = ref false
 let exitcode () = if !filter_opts then 2 else 0
 
@@ -316,45 +311,9 @@ let print_where = ref false
 let print_config = ref false
 let print_tags = ref false
 
-let get_priority opt s =
-  try Flags.priority_of_string s
-  with Invalid_argument _ ->
-    prerr_endline ("Error: low/high expected after "^opt); exit 1
-
-let get_async_proofs_mode opt = function
-  | "off" -> Flags.APoff
-  | "on" -> Flags.APon
-  | "lazy" -> Flags.APonLazy
-  | _ -> prerr_endline ("Error: on/off/lazy expected after "^opt); exit 1
-
-let get_cache opt = function
-  | "force" -> Some Flags.Force
-  | _ -> prerr_endline ("Error: force expected after "^opt); exit 1
-
-
 let set_worker_id opt s =
   assert (s <> "master");
   Flags.async_proofs_worker_id := s
-
-let get_bool opt = function
-  | "yes" -> true
-  | "no" -> false
-  | _ -> prerr_endline ("Error: yes/no expected after option "^opt); exit 1
-
-let get_int opt n =
-  try int_of_string n
-  with Failure _ ->
-    prerr_endline ("Error: integer expected after option "^opt); exit 1
-
-let get_host_port opt s =
-  match CString.split ':' s with
-  | [host; port] -> Some (Spawned.Socket(host, int_of_string port))
-  | ["stdfds"] -> Some Spawned.AnonPipe
-  | _ ->
-     prerr_endline ("Error: host:port or stdfds expected after option "^opt);
-     exit 1
-
-let get_task_list s = List.map int_of_string (Str.split (Str.regexp ",") s)
 
 let vio_tasks = ref []
 
@@ -386,10 +345,6 @@ let set_vio_checking_j opt j =
     prerr_endline "setting the J variable like in 'make vio2vo J=3'";
     exit 1
 
-let is_not_dash_option = function
-  | Some f when String.length f > 0 && f.[0] <> '-' -> true
-  | _ -> false
-
 let schedule_vio_checking () =
   if !vio_files <> [] && !vio_checking then
     Vio_checking.schedule_vio_checking !vio_files_j !vio_files
@@ -404,170 +359,113 @@ let get_native_name s =
       Nativelib.output_dir; Library.native_name_from_filename s]
   with _ -> ""
 
+let to_channel = function
+  | CArguments.Socket (host, port) -> Some (Spawned.Socket (host, port))
+  | CArguments.Stdfds -> Some Spawned.AnonPipe
+
+let process =
+  let open CArguments in
+  function
+    I (path) -> push_ml_include path
+  | Q (path, logical) -> set_include path logical false
+  | R (path, logical) -> set_include path logical true
+  | CheckVioTasks (tno, tfile) -> add_vio_task (tno, tfile)
+  | ScheduleVioChecking (j,files) ->
+    vio_checking := true ;
+    vio_files_j := j ;
+    List.iter add_vio_file files
+  | ScheduleVio2Vo (j, files) ->
+    vio_files_j := j ;
+    List.iter add_vio_file files
+  | Coqlib path -> Flags.coqlib_spec:=true; Flags.coqlib:=path
+  | AsyncProofs mode -> Flags.async_proofs_mode := mode
+  | AsyncProofsJ j -> Flags.async_proofs_n_workers := j
+  | AsyncProofsCache c -> Flags.async_proofs_cache := Some c
+  | AsyncProofsTacJ j -> Flags.async_proofs_n_tacworkers := j
+  | AsyncProofsWorkerPriority p -> Flags.async_proofs_worker_priority := p
+  | AsyncProofsPrivateFlags fs ->
+    Flags.async_proofs_private_flags := Some fs
+  | WorkerId id -> Flags.async_proofs_worker_id := id
+  | Compat v -> Flags.compat_version := get_compat_version v
+  | Compile (verbose, file) -> add_compile verbose file
+  | DumpGlob f -> Dumpglob.dump_into_file f ; glob_opt := true
+  | FeedbackGlob -> Dumpglob.feedback_glob ()
+  | ExcludeDir path -> exclude_search_in_dirname path
+  | InitFile f -> set_rcfile f
+  | InputState f -> set_inputstate f
+  | LoadMLObj path -> Mltop.dir_ml_load path
+  | LoadMLSrc path -> Mltop.dir_ml_use path
+  | LoadVernacObj path -> add_vernac_obj path
+  | LoadVernacSrc (path, v) -> add_load_vernacular v path
+  | OutputState path -> set_outputstate path
+  | Require path -> add_require path
+  | Top name -> set_toplevel_name (dirpath_of_string name)
+  | WithGeoProof b -> Coq_config.with_geoproof := b
+  | MainChannel chn -> Spawned.main_channel := to_channel chn
+  | ControlChannel chn -> Spawned.control_channel := to_channel chn
+  | Vio2Vo p -> add_compile false p; Flags.compilation_mode := Vio2Vo
+  | Toploop name -> toploop := Some name
+  | Warning level -> set_warning level
+  | AsyncDelegate ->
+    Flags.async_proofs_full := true;
+  | AsyncProofsReopenBranch ->
+    Flags.async_proofs_never_reopen_branch := true;
+  | Batch -> set_batch_mode ()
+  | TestMode -> test_mode := true
+  | Beautify -> make_beautify true
+  | Boot -> boot := true; no_load_rc ()
+  | Backtrace -> Backtrace.record_backtrace true
+  | Color c -> set_color c
+  | Config -> print_config := true
+  | Debug -> set_debug ()
+  | Emacs -> set_emacs ()
+  | FilterOps -> filter_opts := true
+  | IdeSlave -> toploop := Some "coqidetop"; Flags.ide_slave := true
+  | ImpredicativeSet -> set_engagement Declarations.ImpredicativeSet
+  | IndicesMatter -> Indtypes.enforce_indices_matter ()
+  | JustParsing -> Vernac.just_parsing := true
+  | Memory -> memory_stat := true
+  | NoInit -> load_init := false
+  | NoCompatNotations -> no_compat_ntn := true
+  | NoGlob -> Dumpglob.noglob (); glob_opt := true
+  | NativeCompiler ->
+    if Coq_config.no_native_compiler then
+      warning "Native compilation was disabled at configure time."
+    else native_compiler := true
+  | NoTop -> unset_toplevel_name ()
+  | OutputContext -> output_context := true
+  | NoRc -> no_load_rc ()
+  | Quiet -> Flags.make_silent true; Flags.make_warn false
+  | BuildVio -> Flags.compilation_mode := Flags.BuildVio
+  | ListTags -> print_tags := true
+  | Time -> Flags.time := true
+  | TypeInType -> set_type_in_type ()
+  | Unicode -> add_require "Utf8_core"
+  | VerboseCompatNotations -> verb_compat_ntn := true
+  | VM -> use_vm := true
+  | Help -> usage ()
+  | Version -> Usage.version (exitcode ())
+  | Where -> print_where := true
+
 let parse_args arglist =
-  let args = ref arglist in
-  let extras = ref [] in
-  let rec parse () = match !args with
-  | [] -> List.rev !extras
-  | opt :: rem ->
-    args := rem;
-    let next () = match !args with
-      | x::rem -> args := rem; x
-      | [] -> error_missing_arg opt
-    in
-    let peek_next () = match !args with
-      | x::_ -> Some x
-      | [] -> None
-    in
-    begin match opt with
-
-    (* Complex options with many args *)
-    |"-I"|"-include" ->
-      begin match rem with
-      | d :: rem -> push_ml_include d; args := rem
-      | [] -> error_missing_arg opt
-      end
-    |"-Q" ->
-      begin match rem with
-      | d :: p :: rem -> set_include d p false; args := rem
-      | _ -> error_missing_arg opt
-      end
-    |"-R" ->
-      begin match rem with
-      | d :: "-as" :: [] -> error_missing_arg opt
-      | d :: "-as" :: p :: rem ->
-        warning "option -R * -as * deprecated, remove the -as";
-        set_include d p true; args := rem
-      | d :: p :: rem -> set_include d p true; args := rem
-      | _ -> error_missing_arg opt
-      end
-
-    (* Options with two arg *)
-    |"-check-vio-tasks" ->
-        let tno = get_task_list (next ()) in
-        let tfile = next () in
-        add_vio_task (tno,tfile)
-    |"-schedule-vio-checking" ->
-        vio_checking := true;
-        set_vio_checking_j opt (next ());
-        add_vio_file (next ());
-        while is_not_dash_option (peek_next ()) do add_vio_file (next ()); done
-    |"-schedule-vio2vo" ->
-        set_vio_checking_j opt (next ());
-        add_vio_file (next ());
-        while is_not_dash_option (peek_next ()) do add_vio_file (next ()); done
-
-    (* Options with one arg *)
-    |"-coqlib" -> Flags.coqlib_spec:=true; Flags.coqlib:=(next ())
-    |"-async-proofs" ->
-        Flags.async_proofs_mode := get_async_proofs_mode opt (next())
-    |"-async-proofs-j" ->
-        Flags.async_proofs_n_workers := (get_int opt (next ()))
-    |"-async-proofs-cache" ->
-        Flags.async_proofs_cache := get_cache opt (next ())
-    |"-async-proofs-tac-j" ->
-        Flags.async_proofs_n_tacworkers := (get_int opt (next ()))
-    |"-async-proofs-worker-priority" ->
-        Flags.async_proofs_worker_priority := get_priority opt (next ())
-    |"-async-proofs-private-flags" ->
-        Flags.async_proofs_private_flags := Some (next ());
-    |"-worker-id" -> set_worker_id opt (next ())
-    |"-compat" -> Flags.compat_version := get_compat_version (next ())
-    |"-compile" -> add_compile false (next ())
-    |"-compile-verbose" -> add_compile true (next ())
-    |"-dump-glob" -> Dumpglob.dump_into_file (next ()); glob_opt := true
-    |"-feedback-glob" -> Dumpglob.feedback_glob ()
-    |"-exclude-dir" -> exclude_search_in_dirname (next ())
-    |"-init-file" -> set_rcfile (next ())
-    |"-inputstate"|"-is" -> set_inputstate (next ())
-    |"-load-ml-object" -> Mltop.dir_ml_load (next ())
-    |"-load-ml-source" -> Mltop.dir_ml_use (next ())
-    |"-load-vernac-object" -> add_vernac_obj (next ())
-    |"-load-vernac-source"|"-l" -> add_load_vernacular false (next ())
-    |"-load-vernac-source-verbose"|"-lv" -> add_load_vernacular true (next ())
-    |"-outputstate" -> set_outputstate (next ())
-    |"-print-mod-uid" -> let s = String.concat " " (List.map get_native_name rem) in print_endline s; exit 0
-    |"-require" -> add_require (next ())
-    |"-top" -> set_toplevel_name (dirpath_of_string (next ()))
-    |"-with-geoproof" -> Coq_config.with_geoproof := get_bool opt (next ())
-    |"-main-channel" -> Spawned.main_channel := get_host_port opt (next())
-    |"-control-channel" -> Spawned.control_channel := get_host_port opt (next())
-    |"-vio2vo" -> add_compile false (next ()); Flags.compilation_mode := Vio2Vo
-    |"-toploop" -> toploop := Some (next ())
-    |"-w" -> set_warning (next ())
-
-    (* Options with zero arg *)
-    |"-async-queries-always-delegate"
-    |"-async-proofs-always-delegate"
-    |"-async-proofs-full" ->
-        Flags.async_proofs_full := true;
-    |"-async-proofs-never-reopen-branch" ->
-        Flags.async_proofs_never_reopen_branch := true;
-    |"-batch" -> set_batch_mode ()
-    |"-test-mode" -> test_mode := true
-    |"-beautify" -> make_beautify true
-    |"-boot" -> boot := true; no_load_rc ()
-    |"-bt" -> Backtrace.record_backtrace true
-    |"-color" -> set_color (next ())
-    |"-config"|"--config" -> print_config := true
-    |"-debug" -> set_debug ()
-    |"-emacs" -> set_emacs ()
-    |"-filteropts" -> filter_opts := true
-    |"-h"|"-H"|"-?"|"-help"|"--help" -> usage ()
-    |"-ideslave" -> toploop := Some "coqidetop"; Flags.ide_slave := true
-    |"-impredicative-set" -> set_engagement Declarations.ImpredicativeSet
-    |"-indices-matter" -> Indtypes.enforce_indices_matter ()
-    |"-just-parsing" -> Vernac.just_parsing := true
-    |"-m"|"--memory" -> memory_stat := true
-    |"-noinit"|"-nois" -> load_init := false
-    |"-no-compat-notations" -> no_compat_ntn := true
-    |"-no-glob"|"-noglob" -> Dumpglob.noglob (); glob_opt := true
-    |"-native-compiler" ->
-      if Coq_config.no_native_compiler then
-	warning "Native compilation was disabled at configure time."
-      else native_compiler := true
-    |"-notop" -> unset_toplevel_name ()
-    |"-output-context" -> output_context := true
-    |"-q" -> no_load_rc ()
-    |"-quiet"|"-silent" -> Flags.make_silent true; Flags.make_warn false
-    |"-quick" -> Flags.compilation_mode := BuildVio
-    |"-list-tags" -> print_tags := true
-    |"-time" -> Flags.time := true
-    |"-type-in-type" -> set_type_in_type ()
-    |"-unicode" -> add_require "Utf8_core"
-    |"-v"|"--version" -> Usage.version (exitcode ())
-    |"-verbose-compat-notations" -> verb_compat_ntn := true
-    |"-vm" -> use_vm := true
-    |"-where" -> print_where := true
-
-    (* Deprecated options *)
-    |"-byte" -> warning "option -byte deprecated, call with .byte suffix"
-    |"-opt" -> warning "option -opt deprecated, call with .opt suffix"
-    |"-full" -> warning "option -full deprecated"
-    |"-notactics" -> warning "Obsolete option \"-notactics\"."; remove_top_ml ()
-    |"-emacs-U" ->
-      warning "Obsolete option \"-emacs-U\", use -emacs instead."; set_emacs ()
-    |"-v7" -> error "This version of Coq does not support v7 syntax"
-    |"-v8" -> warning "Obsolete option \"-v8\"."
-    |"-lazy-load-proofs" -> warning "Obsolete option \"-lazy-load-proofs\"."
-    |"-dont-load-proofs" -> warning "Obsolete option \"-dont-load-proofs\"."
-    |"-force-load-proofs" -> warning "Obsolete option \"-force-load-proofs\"."
-    |"-unsafe" -> warning "Obsolete option \"-unsafe\"."; ignore (next ())
-    |"-quality" -> warning "Obsolete option \"-quality\"."
-    |"-xml" -> warning "Obsolete option \"-xml\"."
-
-    (* Unknown option *)
-    | s -> extras := s :: !extras
-    end;
-    parse ()
-  in
   try
-    parse ()
+    let open CArguments in
+    let (action, params) =
+      parse_args warning error arglist
+    in
+    List.iter process params ;
+    match action with
+    | PrintModUid rem ->
+      let s = String.concat " " (List.map get_native_name rem) in
+      print_endline s;
+      exit 0
+    | Exec rem -> rem
+    | Error err -> assert false (* fatal_error (Errors.print (Errors.UserError(err,"")) false *)
   with
-    | UserError(_, s) as e ->
-      if is_empty s then exit 1
+    UserError(_, s) as e ->
+      if Pp.is_empty s then exit 1
       else fatal_error (Errors.print e) false
-    | any -> fatal_error (Errors.print any) (Errors.is_anomaly any)
+  | any -> fatal_error (Errors.print any) (Errors.is_anomaly any)
 
 let init arglist =
   init_gc ();

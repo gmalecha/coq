@@ -441,6 +441,10 @@ let usage () =
 
 let split_period = Str.split (Str.regexp (Str.quote "."))
 
+let warning x = ()
+
+let error x = ()
+
 let rec parse = function
   | "-c" :: ll -> option_c := true; parse ll
   | "-D" :: ll -> option_D := true; parse ll
@@ -468,10 +472,33 @@ let rec parse = function
   | "-suffix" :: s :: ll -> suffixe := s ; parse ll
   | "-suffix" :: [] -> usage ()
   | "-slash" :: ll ->
-    Printf.eprintf "warning: option -slash has no effect and is deprecated.\n";
+    warning "option -slash has no effect and is deprecated.";
     parse ll
   | ("-h"|"--help"|"-help") :: _ -> usage ()
   | f :: ll -> treat_file None f; parse ll
+  | "--" :: ll ->
+    begin
+      let open CArguments in
+      let (action, params) =
+	CArguments.parse_args
+	  (fun _ -> ())
+	  (fun _ -> ())
+	  ll
+      in
+      List.iter (function
+                 | I dir -> add_caml_dir dir
+		 | R (path, logical) ->
+		   add_rec_dir add_known path (split_period logical)
+		 | Q (path, logical) -> add_dir add_known path (split_period logical)
+		 | Boot -> option_boot := true
+		 | _ -> ()) params ;
+      match action with
+      | Exec rest -> parse rest
+      | Error s ->
+	Printf.eprintf "Failed to parse 'coqc' command line"
+      | PrintModUid s ->
+	Printf.eprintf "coqdep can not interpret print-mod-uid"
+    end
   | [] -> ()
 
 let coqdep () =

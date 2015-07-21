@@ -35,7 +35,6 @@ type structured_constant =
   | Const_b0 of tag
   | Const_bn of tag * structured_constant array
 
-
 type reloc_table = (tag * int) array
 
 type annot_switch =
@@ -71,7 +70,7 @@ type instruction =
                    (* nb fv, init, lbl types, lbl bodies *)
   | Kclosurecofix of int * int * Label.t array * Label.t array
                    (* nb fv, init, lbl types, lbl bodies *)
-  | Kgetglobal of pconstant
+  | Kgetglobal of bool * constant
   | Kconst of structured_constant
   | Kmakeblock of int * tag             (* size, tag *)
   | Kmakeprod
@@ -152,7 +151,8 @@ type comp_env = {
     pos_rec  : instruction list; (* instruction d'acces pour les variables *)
                                  (*  de point fix ou de cofix              *)
     offset : int;
-    in_env : vm_env ref
+    in_env : vm_env ref;
+    univ_env : Univ.Level.t array
   }
 
 
@@ -210,7 +210,8 @@ let rec pp_instr i =
 	     prlist_with_sep spc pp_lbl (Array.to_list lblt) ++
 	     str " bodies = " ++
 	     prlist_with_sep spc pp_lbl (Array.to_list lblb))
-  | Kgetglobal (id,u) -> str "getglobal " ++ pr_con id
+  | Kgetglobal (false,id) -> str "getglobal " ++ pr_con id
+  | Kgetglobal (true,id) -> str "getglobal_poly " ++ pr_con id
   | Kconst sc ->
       str "const " ++ pp_struct_const sc
   | Kmakeblock(n, m) ->

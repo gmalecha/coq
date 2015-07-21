@@ -159,10 +159,10 @@ let rec slot_for_getglobal env (kn,u) =
       | Some code ->
 	 match Cemitcodes.force code with
 	 | BCdefined(code,pl,fv) ->
-	    if Univ.Instance.is_empty u then
-	    let v = eval_to_patch env (code,pl,fv) in
+(*	    if Univ.Instance.is_empty u then *)
+	      let v = eval_to_patch env (code,pl,fv) in
 	      set_global v
-	    else set_global (val_of_constant (kn,u))
+(*	    else set_global (val_of_constant (kn,u)) *)
 	 | BCallias kn' -> slot_for_getglobal env kn'
 	 | BCconstant -> set_global (val_of_constant (kn,u)) in
 (*Pp.msgnl(str"value stored at: "++int pos);*)
@@ -208,7 +208,7 @@ and eval_to_patch env (buff,pl,fv) =
     | Reloc_const sc, pos -> patch_int buff pos (slot_for_str_cst sc)
     | Reloc_getglobal kn, pos ->
 (*      Pp.msgnl (str"patching global: "++str(debug_string_of_con kn));*)
-	patch_int buff pos (slot_for_getglobal env kn);
+	patch_int buff pos (slot_for_getglobal env (kn, Univ.Instance.empty));
 (*      Pp.msgnl (str"patch done: "++str(debug_string_of_con kn))*)
   in
   List.iter patch pl;
@@ -232,5 +232,3 @@ and val_of_constr env c =
 
 let set_transparent_const kn = () (* !?! *)
 let set_opaque_const kn = () (* !?! *)
-
-

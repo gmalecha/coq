@@ -245,9 +245,11 @@ let build_constant_declaration kn env (def,typ,proj,poly,univs,inline_code,ctx) 
   let tps = 
     (* FIXME: incompleteness of the bytecode vm: we compile polymorphic 
        constants like opaque definitions. *)
-    if poly then Some (Cemitcodes.from_val Cemitcodes.BCconstant)
-    else
-      let res = 
+    let res = 
+      if poly then 
+	compile_constant_body ~polymorphic:univs env def
+    (* Some (Cemitcodes.from_val Cemitcodes.BCconstant) *)
+      else
 	match proj with
 	| None -> compile_constant_body env def
 	| Some pb ->

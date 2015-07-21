@@ -103,6 +103,7 @@ let empty_comp_env ()=
     pos_rec = [];
     offset = 0;
     in_env = ref empty_fv;
+    univ_env = Univ.Instance.to_array Univ.Instance.empty;
   }
 
 (*i Creation functions for comp_env *)
@@ -116,7 +117,18 @@ let comp_env_fun arity =
     nb_rec = 0;
     pos_rec = [];
     offset = 1;
-    in_env = ref empty_fv
+    in_env = ref empty_fv ;
+    univ_env = Univ.Instance.to_array Univ.Instance.empty;
+  }
+
+let comp_env_pfun arity inst =
+  { nb_stack = arity;
+    in_stack = add_param arity 0 [];
+    nb_rec = 0;
+    pos_rec = [];
+    offset = 1;
+    in_env = ref empty_fv ;
+    univ_env = Univ.Instance.to_array inst
   }
 
 
@@ -126,7 +138,8 @@ let comp_env_fix_type rfv =
     nb_rec = 0;
     pos_rec = [];
     offset = 1;
-    in_env = rfv
+    in_env = rfv ;
+    univ_env = Univ.Instance.to_array Univ.Instance.empty
   }
 
 let comp_env_fix ndef curr_pos arity rfv =
@@ -139,7 +152,8 @@ let comp_env_fix ndef curr_pos arity rfv =
      nb_rec = ndef;
      pos_rec = !prec;
      offset = 2 * (ndef - curr_pos - 1)+1;
-     in_env = rfv
+     in_env = rfv ;
+     univ_env = Univ.Instance.to_array Univ.Instance.empty
    }
 
 let comp_env_cofix_type ndef rfv =
@@ -148,7 +162,8 @@ let comp_env_cofix_type ndef rfv =
     nb_rec = 0;
     pos_rec = [];
     offset = 1+ndef;
-    in_env = rfv
+    in_env = rfv;
+    univ_env = Univ.Instance.to_array Univ.Instance.empty
   }
 
 let comp_env_cofix ndef arity rfv =
@@ -161,7 +176,8 @@ let comp_env_cofix ndef arity rfv =
      nb_rec = ndef;
      pos_rec = !prec;
      offset = ndef+1;
-     in_env = rfv
+     in_env = rfv ;
+     univ_env = Univ.Instance.to_array Univ.Instance.empty
    }
 
 (* [push_param ] add function parameters on the stack *)
@@ -528,13 +544,34 @@ let rec get_allias env (kn,u as p) =
   let cb = lookup_constant kn env in
   let tps = cb.const_body_code in
     match tps with
-    | None -> p
+    | None -> (p, cb.const_polymorphic)
     | Some tps ->
        (match Cemitcodes.force tps with
 	| BCallias (kn',u') -> get_allias env (kn', Univ.subst_instance_instance u u')
-	| _ -> p)
+	| _ -> (p, cb.const_polymorphic))
 
 (* Compiling expressions *)
+
+let compile_universe_instance reloc c cont =
+  let rec get i x rst =
+    if i < Array.length reloc.univ_env then
+      if Univ.Level.equal x reloc.univ_env.(i) then
+	 Kacc (reloc.nb_stack-1) :: Kfield i :: Kpush :: rst
+      else get (i+1) x rst
+    else
+      Kconst (Const_sorts (Type (Univ.Universe.make x))) :: Kpush :: rst
+  in
+  Array.fold_right (get 0) c cont
+
+let compile_getglobal reloc kn u cont =
+  let ((const,univs),is_poly) = get_allias !global_env (kn, u) in
+  if not is_poly then
+    Kgetglobal (false, const) :: cont
+  else
+    (** HERE I need to compile u into a description of the universes **)
+    let lvls = Univ.Instance.to_array univs in
+    compile_universe_instance reloc lvls
+      (Kgetglobal (false, const) :: Kapply 1 :: cont)
 
 let rec compile_constr reloc c sz cont =
   match kind_of_term c with
@@ -756,18 +793,16 @@ and compile_const =
                   (mkConstU (kn,u)) reloc args sz cont
   with Not_found ->
     if Int.equal nargs 0 then
-      Kgetglobal (get_allias !global_env (kn, u)) :: cont
+      compile_getglobal reloc kn u cont
     else
-      comp_app (fun _ _ _ cont ->
-                   Kgetglobal (get_allias !global_env (kn,u)) :: cont)
+      comp_app (fun _ _ _ cont -> compile_getglobal reloc kn u cont)
         compile_constr reloc () args sz cont
 
-let compile fail_on_error env c =
+let compile_helper reloc fail_on_error env c =
   set_global_env env;
   init_fun_code ();
   Label.reset_label_counter ();
-  let reloc = empty_comp_env () in
-  try 
+  try
     let init_code = compile_constr reloc c 0 [Kstop] in
     let fv = List.rev (!(reloc.in_env).fv_rev) in
     let pp_v v =
@@ -789,7 +824,10 @@ let compile fail_on_error env c =
 	    Id.print tname ++ str str_max_constructors));
        None)
 
-let compile_constant_body fail_on_error env = function
+let compile fail_on_error env c =
+  compile_helper (empty_comp_env ()) fail_on_error env c
+
+let compile_constant_body ?polymorphic fail_on_error env = function
   | Undef _ | OpaqueDef _ -> Some BCconstant
   | Def sb ->
       let body = Mod_subst.force_constr sb in
@@ -797,10 +835,17 @@ let compile_constant_body fail_on_error env = function
 	| Const (kn',u) ->
 	    (* we use the canonical name of the constant*)
 	    let con= constant_of_kn (canonical_con kn') in
-	      Some (BCallias (get_allias env (con,u)))
+	    Some (BCallias (fst (get_allias env (con,u)))) (** TODO **)
 	| _ ->
-	    let res = compile fail_on_error env body in
-	      Option.map (fun x -> BCdefined (to_memory x)) res
+	  let res =
+	    match polymorphic with
+	      None -> compile fail_on_error env body
+	    | Some uc ->
+	      let univs = Univ.UContext.instance uc in
+	      compile_helper (comp_env_pfun 0 univs) fail_on_error env
+		(Term.mkLambda (Names.Name.Anonymous, Term.mkProp (* BAD *), body))
+	  in
+	  Option.map (fun x -> BCdefined (to_memory x)) res
 
 (* Shortcut of the previous function used during module strengthening *)
 
@@ -902,14 +947,15 @@ let op2_compilation op =
   3/ if at least one is not, branches to the normal behavior:
       Kgetglobal (get_allias !global_env kn) *)
 let op_compilation n op =
-  let code_construct kn cont =
+  let code_construct reloc kn cont =
      let f_cont =
          let else_lbl = Label.create () in
          Kareconst(n, else_lbl):: Kacc 0:: Kpop 1::
           op:: Kreturn 0:: Klabel else_lbl::
          (* works as comp_app with nargs = n and tailcall cont [Kreturn 0]*)
-          Kgetglobal (get_allias !global_env kn)::
-          Kappterm(n, n):: [] (* = discard_dead_code [Kreturn 0] *)
+          (* Kgetglobal (false, fst (get_allias !global_env kn)):: (** TODO **) *)
+	  compile_getglobal reloc (fst kn) (snd kn) (
+          Kappterm(n, n):: [] (* = discard_dead_code [Kreturn 0] *))
      in
      let lbl = Label.create () in
      fun_code := [Ksequence (add_grab n lbl f_cont, !fun_code)];
@@ -926,12 +972,13 @@ let op_compilation n op =
            (*Kaddint31::escape::Klabel else_lbl::Kpush::*)
            (op::escape::Klabel else_lbl::Kpush::
            (* works as comp_app with nargs = n and non-tailcall cont*)
-           Kgetglobal (get_allias !global_env kn)::
-           Kapply n::labeled_cont)))
+	   (* Kgetglobal (false, fst (get_allias !global_env kn)):: (** TODO **) *)
+           compile_getglobal reloc (fst kn) (snd kn) (
+             Kapply n::labeled_cont))))
   else if Int.equal nargs 0 then
-    code_construct kn cont
+    code_construct reloc kn cont
   else
-    comp_app (fun _ _ _ cont -> code_construct kn cont)
+    comp_app (fun _ _ _ cont -> code_construct reloc kn cont)
       compile_constr reloc () args sz cont
 
 let int31_escape_before_match fc cont =

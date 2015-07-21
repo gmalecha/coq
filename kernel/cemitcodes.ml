@@ -19,7 +19,7 @@ open Mod_subst
 type reloc_info =
   | Reloc_annot of annot_switch
   | Reloc_const of structured_constant
-  | Reloc_getglobal of pconstant
+  | Reloc_getglobal of Names.constant
 
 type patch = reloc_info * int
 
@@ -138,7 +138,6 @@ and slot_for_getglobal p =
 
 (* Emission of one instruction *)
 
-
 let emit_instr = function
   | Klabel lbl -> define_label lbl
   | Kacc n ->
@@ -188,8 +187,9 @@ let emit_instr = function
       Array.iter (out_label_with_orig org) lbl_types;
       let org = !out_position in
       Array.iter (out_label_with_orig org) lbl_bodies
-  | Kgetglobal q ->
-      out opGETGLOBAL; slot_for_getglobal q
+  | Kgetglobal (poly,kn) ->
+      out (if poly then opGETPGLOBAL else opGETGLOBAL);
+      slot_for_getglobal kn
   | Kconst((Const_b0 i)) ->
       if i >= 0 && i <= 3
           then out (opCONST0 + i)
@@ -271,8 +271,10 @@ let rec emit = function
       then out(opPUSHOFFSETCLOSURE0 + ofs / 2)
       else (out opPUSHOFFSETCLOSURE; out_int ofs);
       emit c
-  | Kpush :: Kgetglobal id :: c ->
-      out opPUSHGETGLOBAL; slot_for_getglobal id; emit c
+  | Kpush :: Kgetglobal (poly, kn) :: c ->
+      out (if poly then opPUSHGETPGLOBAL else opPUSHGETGLOBAL);
+      slot_for_getglobal kn;
+      emit c
   | Kpush :: Kconst (Const_b0 i) :: c ->
       if i >= 0 && i <= 3
       then out (opPUSHCONST0 + i)
@@ -285,6 +287,8 @@ let rec emit = function
       out opRETURN; out_int n; emit c
   | Ksequence(c1,c2)::c ->
       emit c1; emit c2;emit c
+  | Kapply n :: Kapply m :: c->
+    emit (Kapply (n+m) :: c)
   (* Default case *)
   | instr :: c ->
       emit_instr instr; emit c
@@ -318,7 +322,7 @@ let subst_patch s (ri,pos) =
       let ci = {a.ci with ci_ind = (subst_mind s kn,i)} in
       (Reloc_annot {a with ci = ci},pos)
   | Reloc_const sc -> (Reloc_const (subst_strcst s sc), pos)
-  | Reloc_getglobal kn -> (Reloc_getglobal (subst_pcon s kn), pos)
+  | Reloc_getglobal kn -> (Reloc_getglobal kn (*subst_pcon s kn*), pos)
 
 let subst_to_patch s (code,pl,fv) =
   code,List.rev_map (subst_patch s) pl,fv

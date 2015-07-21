@@ -44,13 +44,13 @@ module Label :
 
 type instruction =
   | Klabel of Label.t
-  | Kacc of int
-  | Kenvacc of int
-  | Koffsetclosure of int
-  | Kpush
-  | Kpop of int
-  | Kpush_retaddr of Label.t
-  | Kapply of int                       (**  number of arguments *)
+  | Kacc of int                         (** accu = sp[n] *)
+  | Kenvacc of int                      (** accu = coq_env[n] *)
+  | Koffsetclosure of int               (** accu = &coq_env[n] *)
+  | Kpush                               (** sp = acc :: sp *)
+  | Kpop of int                         (** sp = skipn n sp *)
+  | Kpush_retaddr of Label.t            (** sp = pc :: coq_env :: coq_extra_args :: sp ; coq_extra_args = 0 *)
+  | Kapply of int                       (** number of arguments (arguments stored on top of stack) *)
   | Kappterm of int * int               (** number of arguments, slot size *)
   | Kreturn of int                      (** slot size *)
   | Kjump
@@ -62,15 +62,15 @@ type instruction =
                    (** nb fv, init, lbl types, lbl bodies *)
   | Kclosurecofix of int * int * Label.t array * Label.t array
                    (** nb fv, init, lbl types, lbl bodies *)
-  | Kgetglobal of pconstant
+  | Kgetglobal of bool * constant       (** accu = coq_global_data[c] *)
   | Kconst of structured_constant
   | Kmakeblock of int * tag             (** size, tag *)
   | Kmakeprod
   | Kmakeswitchblock of Label.t * Label.t * annot_switch * int
   | Kswitch of Label.t array * Label.t array (** consts,blocks *)
   | Kpushfields of int
-  | Kfield of int
-  | Ksetfield of int
+  | Kfield of int                       (** accu = accu[n] *)
+  | Ksetfield of int                    (** accu[n] = sp[0] ; sp = pop sp *)
   | Kstop
   | Ksequence of bytecodes * bytecodes
   | Kproj of int * Constant.t  (** index of the projected argument,
@@ -143,7 +143,8 @@ type comp_env = {
     pos_rec  : instruction list; (** instruction d'acces pour les variables *)
                                  (**  de point fix ou de cofix              *)
     offset : int;
-    in_env : vm_env ref
+    in_env : vm_env ref;
+    univ_env : Univ.Level.t array
   }
 
 val dump_bytecode : bytecodes -> unit

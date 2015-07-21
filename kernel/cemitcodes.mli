@@ -4,7 +4,7 @@ open Cbytecodes
 type reloc_info =
   | Reloc_annot of annot_switch
   | Reloc_const of structured_constant
-  | Reloc_getglobal of constant Univ.puniverses
+  | Reloc_getglobal of Names.constant (*  Univ.puniverses *)
 
 type patch = reloc_info * int
 

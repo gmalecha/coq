@@ -723,7 +723,7 @@ value coq_interprete
 	accu = Field(coq_global_data, *pc);
         pc++;
         Next;
-      }
+      }    
 
 /* Allocation of blocks */
 

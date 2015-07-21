@@ -70,7 +70,7 @@ type instruction =
                    (* nb fv, init, lbl types, lbl bodies *)
   | Kclosurecofix of int * int * Label.t array * Label.t array
                    (* nb fv, init, lbl types, lbl bodies *)
-  | Kgetglobal of bool * constant
+  | Kgetglobal of constant
   | Kconst of structured_constant
   | Kmakeblock of int * tag             (* size, tag *)
   | Kmakeprod
@@ -210,8 +210,7 @@ let rec pp_instr i =
 	     prlist_with_sep spc pp_lbl (Array.to_list lblt) ++
 	     str " bodies = " ++
 	     prlist_with_sep spc pp_lbl (Array.to_list lblb))
-  | Kgetglobal (false,id) -> str "getglobal " ++ pr_con id
-  | Kgetglobal (true,id) -> str "getglobal_poly " ++ pr_con id
+  | Kgetglobal id -> str "getglobal " ++ pr_con id
   | Kconst sc ->
       str "const " ++ pp_struct_const sc
   | Kmakeblock(n, m) ->

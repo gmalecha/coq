@@ -566,12 +566,12 @@ let compile_universe_instance reloc c cont =
 let compile_getglobal reloc kn u cont =
   let ((const,univs),is_poly) = get_allias !global_env (kn, u) in
   if not is_poly then
-    Kgetglobal (false, const) :: cont
+    Kgetglobal const :: cont
   else
     (** HERE I need to compile u into a description of the universes **)
     let lvls = Univ.Instance.to_array univs in
     compile_universe_instance reloc lvls
-      (Kgetglobal (false, const) :: Kapply 1 :: cont)
+      (Kgetglobal const :: Kapply 1 :: cont)
 
 let rec compile_constr reloc c sz cont =
   match kind_of_term c with
@@ -953,7 +953,6 @@ let op_compilation n op =
          Kareconst(n, else_lbl):: Kacc 0:: Kpop 1::
           op:: Kreturn 0:: Klabel else_lbl::
          (* works as comp_app with nargs = n and tailcall cont [Kreturn 0]*)
-          (* Kgetglobal (false, fst (get_allias !global_env kn)):: (** TODO **) *)
 	  compile_getglobal reloc (fst kn) (snd kn) (
           Kappterm(n, n):: [] (* = discard_dead_code [Kreturn 0] *))
      in
@@ -972,7 +971,6 @@ let op_compilation n op =
            (*Kaddint31::escape::Klabel else_lbl::Kpush::*)
            (op::escape::Klabel else_lbl::Kpush::
            (* works as comp_app with nargs = n and non-tailcall cont*)
-	   (* Kgetglobal (false, fst (get_allias !global_env kn)):: (** TODO **) *)
            compile_getglobal reloc (fst kn) (snd kn) (
              Kapply n::labeled_cont))))
   else if Int.equal nargs 0 then

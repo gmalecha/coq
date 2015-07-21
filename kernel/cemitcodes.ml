@@ -187,9 +187,8 @@ let emit_instr = function
       Array.iter (out_label_with_orig org) lbl_types;
       let org = !out_position in
       Array.iter (out_label_with_orig org) lbl_bodies
-  | Kgetglobal (poly,kn) ->
-      out (if poly then opGETPGLOBAL else opGETGLOBAL);
-      slot_for_getglobal kn
+  | Kgetglobal kn ->
+      out opGETGLOBAL; slot_for_getglobal kn
   | Kconst((Const_b0 i)) ->
       if i >= 0 && i <= 3
           then out (opCONST0 + i)
@@ -271,10 +270,8 @@ let rec emit = function
       then out(opPUSHOFFSETCLOSURE0 + ofs / 2)
       else (out opPUSHOFFSETCLOSURE; out_int ofs);
       emit c
-  | Kpush :: Kgetglobal (poly, kn) :: c ->
-      out (if poly then opPUSHGETPGLOBAL else opPUSHGETGLOBAL);
-      slot_for_getglobal kn;
-      emit c
+  | Kpush :: Kgetglobal kn :: c ->
+      out opPUSHGETGLOBAL; slot_for_getglobal kn; emit c
   | Kpush :: Kconst (Const_b0 i) :: c ->
       if i >= 0 && i <= 3
       then out (opPUSHCONST0 + i)

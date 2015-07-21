@@ -62,7 +62,7 @@ type instruction =
                    (** nb fv, init, lbl types, lbl bodies *)
   | Kclosurecofix of int * int * Label.t array * Label.t array
                    (** nb fv, init, lbl types, lbl bodies *)
-  | Kgetglobal of bool * constant       (** accu = coq_global_data[c] *)
+  | Kgetglobal of constant              (** accu = coq_global_data[c] *)
   | Kconst of structured_constant
   | Kmakeblock of int * tag             (** size, tag *)
   | Kmakeprod

@@ -725,19 +725,6 @@ value coq_interprete
         Next;
       }
 
-      Instruct(PUSHGETPGLOBAL) {
-	print_instr("PUSH");
-	*--sp = accu;
-      }
-      /* Fallthrough */
-      Instruct(GETPGLOBAL){
-	value inst = *sp--;
-	print_instr("GETPGLOBAL");
-	accu = Field(coq_global_data, *pc);
-        pc++;
-        Next;
-      }
-
 /* Allocation of blocks */
 
       Instruct(MAKEBLOCK) {

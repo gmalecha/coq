@@ -553,22 +553,23 @@ let rec get_allias env (kn,u as p) =
 (* Compiling expressions *)
 
 let compile_universe_instance reloc c cont =
-  let rec get i x rst =
-    if i < Array.length reloc.univ_env then
-      if Univ.Level.equal x reloc.univ_env.(i) then
-	 Kacc (reloc.nb_stack-1) :: Kfield i :: Kpush :: rst
-      else get (i+1) x rst
-    else
+  let counter = ref (-1) in
+  let rec get x rst =
+    counter := 1 + !counter ;
+    match Univ.Level.var_index x with
+    | None ->
+      (** TODO: this is probably wrong *)
       Kconst (Const_sorts (Type (Univ.Universe.make x))) :: Kpush :: rst
+    | Some var ->
+      Kacc (reloc.nb_stack + !counter) :: Kfield var :: Kpush :: rst
   in
-  Array.fold_right (get 0) c cont
+  Array.fold_right get c cont
 
 let compile_getglobal reloc kn u cont =
   let ((const,univs),is_poly) = get_allias !global_env (kn, u) in
   if not is_poly then
     Kgetglobal const :: cont
   else
-    (** HERE I need to compile u into a description of the universes **)
     let lvls = Univ.Instance.to_array univs in
     compile_universe_instance reloc lvls
       (Kgetglobal const :: Kapply 1 :: cont)

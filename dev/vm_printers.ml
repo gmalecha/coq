@@ -13,7 +13,7 @@ let ppripos (ri,pos) =
 	("annot : MutInd("^(string_of_mind sp)^","^(string_of_int i)^")\n")
   | Reloc_const _ ->
       print_string "structured constant\n"
-  | Reloc_getglobal (kn,_) ->
+  | Reloc_getglobal kn ->
       print_string ("getglob "^(string_of_con kn)^"\n"));
    print_flush ()
 
@@ -49,6 +49,7 @@ let rec ppzipper z =
       close_box()
   | Zfix _ -> print_string "Zfix"
   | Zswitch _ -> print_string "Zswitch"
+  | Zproj _ -> print_string "Zproj"
 
 and ppstack s =
   open_hovbox 0;

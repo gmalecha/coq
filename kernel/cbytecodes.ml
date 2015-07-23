@@ -58,7 +58,7 @@ type instruction =
   | Kpush
   | Kpop of int
   | Kpush_retaddr of Label.t
-  | Kapply of int                       (*  number of arguments *)
+  | Kapply of int                       (* number of arguments *)
   | Kappterm of int * int               (* number of arguments, slot size *)
   | Kreturn of int                      (* slot size *)
   | Kjump

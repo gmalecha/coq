@@ -1037,7 +1037,14 @@ let interp_recursive isfix fixl notations =
   let fixnames = List.map (fun fix -> fix.fix_name) fixl in
 
   (* Interp arities allowing for unresolved types *)
-  let evdref = ref (Evd.from_env env) in
+  let all_universes =
+    List.fold_right (fun sfe acc ->
+        match sfe.fix_univs , acc with
+        | None , acc -> acc
+        | x , None -> x
+        | Some ls , Some us -> Some (ls @ us)) fixl None in
+  let ctx = Evd.make_evar_universe_context env all_universes in
+  let evdref = ref (Evd.from_ctx ctx) in
   let fixctxs, fiximppairs, fixannots =
     List.split3 (List.map (interp_fix_context env evdref isfix) fixl) in
   let fixctximpenvs, fixctximps = List.split fiximppairs in

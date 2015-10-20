@@ -167,7 +167,6 @@ type whd =
 (*************************************************)
 
 let rec whd_accu a stk =
-  Printf.eprintf "whd_accu (size=%d) (tag = %d)\r\n" (Obj.size a) (Obj.tag (Obj.field a 1)) ; flush stderr ;
   let stk =
     if Int.equal (Obj.size a) 2 then stk
     else Zapp (Obj.obj a) :: stk in

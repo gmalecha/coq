@@ -637,6 +637,24 @@ let apply_whd k whd =
       apply_stack (val_of_atom a) stk v 
   | Vuniv_level lvl -> assert false
 
+let instantiate_universe =
+  let rec block_to_mp blk n mp =
+    if n < 0 then mp
+    else
+      let u = uni_lvl_val (bfield blk n) in
+      block_to_mp blk (n-1)
+        (Univ.LMap.add (Univ.Level.var n) u mp)
+  in
+  fun (u : Univ.universe) (stk : stack) ->
+  match stk with
+  | [] -> u
+  | [Zapp args] ->
+    assert (1 = nargs args) ;
+    let blk = Obj.magic (arg args 0) in
+    let subst = block_to_mp blk (bsize blk - 1) Univ.LMap.empty in
+    Univ.subst_univs_level_universe subst u
+  | _ ->
+    Errors.anomaly Pp.(str "Ill-formated universe")
 
 let rec pr_atom a =
   Pp.(match a with
@@ -667,3 +685,4 @@ and pr_zipper z =
   | Zfix (f,args) -> str "Zfix(..., len=" ++ int (nargs args) ++ str ")"
   | Zswitch s -> str "Zswitch(...)"
   | Zproj c -> str "Zproj(" ++ Names.pr_con c ++ str ")")
+

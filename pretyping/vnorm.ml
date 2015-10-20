@@ -180,8 +180,6 @@ and nf_whd env whd typ =
       mkApp(capp,args)
   | Vatom_stk(Aid idkey, stk) ->
       constr_type_of_idkey env idkey stk nf_stk
-(*let c,typ = constr_type_of_idkey env idkey in
-      nf_stk env c typ stk *)
   | Vatom_stk(Aind ((mi,i) as ind), stk) ->
       if Environ.polymorphic_ind ind env then
 	let mib = Environ.lookup_mind mi env in
@@ -199,20 +197,7 @@ and nf_whd env whd typ =
 	let pind = (ind, Univ.Instance.empty) in
 	nf_stk env (mkIndU pind) (type_of_ind env pind) stk
   | Vatom_stk(Atype u, stk) ->
-    begin
-      match stk with
-      | [Zapp args] ->
-	assert (Univ.LSet.cardinal (Univ.Universe.levels u) = nargs args) ;
-	let _,mp = Univ.LSet.fold (fun key (i,mp) ->
-	  let u = Vm.uni_lvl_val (arg args i) in
-	  (i+1, Univ.LMap.add key (Univ.Universe.make u) mp))
-	  (Univ.Universe.levels u)
-	  (0,Univ.LMap.empty) in
-	let subst = Univ.make_subst mp in
-	let nuniv = Univ.subst_univs_universe subst u in
-	mkSort (Type nuniv)
-      | _ -> assert false
-    end
+    mkSort (Type (Vm.instantiate_universe u stk))
   | Vuniv_level lvl ->
     assert false
 

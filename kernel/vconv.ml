@@ -118,26 +118,12 @@ and conv_atom env pb k a1 stk1 a2 stk2 cu =
       if Vars.eq_id_key ik1 ik2 && compare_stack stk1 stk2 then
 	conv_stack env k stk1 stk2 cu
       else raise NotConvertible
-(*
-  | Aiddef(ik1,v1), Aiddef(ik2,v2) ->
-    begin
-      try
-	if Vars.eq_id_key ik1 ik2 && compare_stack stk1 stk2 then
-          conv_stack env k stk1 stk2 cu
-        else raise NotConvertible
-      with NotConvertible ->
-	if oracle_order (fun x -> x) (oracle_of_infos !infos)
-             false ik1 ik2 then
-          conv_whd env pb k (whd_stack v1 stk1) (Vatom_stk(a2,stk2)) cu
-        else conv_whd env pb k (Vatom_stk(a1,stk1)) (whd_stack v2 stk2) cu
-    end
-  | Aiddef(ik1,v1), _ ->
-      conv_whd env pb k (force_whd v1 stk1) (Vatom_stk(a2,stk2)) cu
-  | _ , Aiddef(ik2,v2) ->
-      conv_whd env pb k (Vatom_stk(a1,stk1)) (force_whd v2 stk2) cu
-*)
   | Atype u1 , Atype u2 ->
-    sort_cmp_universes env pb (Type u1) (Type u2) cu
+    begin
+      let u1 = Vm.instantiate_universe u1 stk1 in
+      let u2 = Vm.instantiate_universe u2 stk2 in
+      sort_cmp_universes env pb (Type u1) (Type u2) cu
+    end
   | Atype _ , Aid _
   | Atype _ , Aind _
   | Aid _ , Atype _

@@ -9,6 +9,8 @@
 (* Author: Benjamin Grégoire as part of the bytecode-based virtual reduction
    machine, Oct 2004 *)
 (* Extension: Arnaud Spiwack (support for native arithmetic), May 2005 *)
+(* Extension: Gregory Malecha (support for universe polymorphic definitions),
+   October 2015 *)
 
 open Util
 open Names
@@ -38,7 +40,7 @@ open Pre_env
 (* In the function body [arg1] is represented by de Bruijn [n], and       *)
 (* [argn] by de Bruijn [1]                                                *)
 
-(* Representation of environments of mutual fixpoints :                  *)
+(* Representation of environments of mutual fixpoints :                   *)
 (* [t1|C1| ... |tc|Cc| ... |t(nbr)|C(nbr)| fv1 | fv2 | .... | fvn | type] *)
 (*                ^<----------offset--------->                            *)
 (* type = [Ct1 | .... | Ctn]                                              *)
@@ -90,6 +92,21 @@ open Pre_env
 (*                                                                        *)
 (* In Cfxe_t accumulators, we need to store [fcofixi] for testing         *)
 (* conversion of cofixpoints (which is intentional).                      *)
+
+(* Representation of universes :                                          *)
+(*  All top-level definitions accept a new universe argument which is a   *)
+(*  block containing all of the universes used to instantiate the         *)
+(*  function. When the function is invoked, it instantiates all of the    *)
+(*  polymorphic functions that it might use before doing any other code.  *)
+(*  These instantiations are tracked the same way that regular variables  *)
+(*  are tracked; i.e. using [in_env] in the [comp_env] structure.         *)
+
+(* Universes Attached to Type :                                           *)
+(*  The term [Type u] where [u] is a universe is represented as [Vtype u] *)
+(*  (where [u] comes *directly* from the term). In the case that it       *)
+(*  mentions universe variables, the term will be applied to the dynamic  *)
+(*  universe record allowing the appropriate universe to be constructed   *)
+(*  on the other end.                                                     *)
 
 
 let empty_fv = { size= 0;  fv_rev = [] }
@@ -601,18 +618,13 @@ let rec compile_constr reloc c sz cont =
   | Sort (Type u) ->
     begin
       let levels = Univ.Universe.levels u in
+      (* Check whether any universe variables occur in the universe
+       *)
       if Univ.LSet.exists (fun x -> Univ.Level.var_index x <> None) levels
       then
-	let level_vars =
-	  List.map_filter (fun x -> Univ.Level.var_index x)
-	    (Univ.LSet.elements levels)
-	in
-        let compile_get_univ reloc idx sz cont =
-	  compile_fv_elem reloc FVunivs sz (Kfield idx :: cont)
-	in
-        comp_app compile_str_cst compile_get_univ reloc
+        comp_app compile_str_cst compile_fv_elem reloc
 	   (Bstrconst (Const_type u))
-	   (Array.of_list level_vars)
+	   [| FVunivs |]
 	   sz
 	   cont
       else
@@ -844,12 +856,17 @@ let is_univ_copy max u =
     false
 
 let compile_inst u_size inst u_offset cont =
-  (** Note: this code boxes universe instances of size 1 so
-   ** that [compile_constr] can access universese in a uniform way
-   **)
+  (* Note: this code boxes universe instances of size 1 so
+   * that [compile_constr] can access universese in a uniform way.
+   * If this changes, the representation of [Type u] must change
+   * as well (or there needs to be a case for unboxed universes.
+   *)
   if Univ.Instance.is_empty inst then
     Kconst (Const_b0 univ_instance_tag) :: cont
   else if is_univ_copy u_size inst then
+    (* If the instatiation is a copy to our instantiation then
+     * simply re-use it.
+     *)
     Kacc u_offset :: cont
   else
     let ainst = Univ.Instance.to_array inst in
@@ -865,7 +882,6 @@ let compile_inst u_size inst u_offset cont =
     in
     result
 
-(** The annoying piece of this function is that the order is less-than-ideal. **)
 let compile_poly_inst u_size subst_lbl =
   let rec compile_poly_inst reloc fvs sz cont =
     match fvs with
@@ -882,9 +898,18 @@ let compile_poly_inst u_size subst_lbl =
       | _ -> compile_fv_elem reloc fv_elem sz cont
   in compile_poly_inst
 
-(** TODO: Better way to compile monomorphic definitions
- ** TODO: There is a tight coupling between [cont] and [for_closure]
- **)
+(* Potential improvements:
+ * - Currently *all* definitions add a universe closure that is boxed.
+ *   One improvement would be to un-box closures in terms that are polymorphic
+ *   on a single universe.
+ * - This approach pays for universes everywhere, not just at polymorphic
+ *   definitions. A better solution might be to only pay for polymorphic
+ *   definitions when they are actually used.
+ * - With the current approach, we still have the diamond problem.
+ *   Multiple functions using the same underlying function will re-instantiate
+ *   universes.
+ * Note: There is a tight coupling between [cont] and [for_closure]
+ *)
 let compile_term fail_on_error env for_closure instance_size c cont =
   set_global_env env;
   init_fun_code ();
@@ -892,12 +917,12 @@ let compile_term fail_on_error env for_closure instance_size c cont =
   try
     let reloc = comp_env_fun 0 in
     let body_code = compile_constr reloc c 0 [Kreturn 0] in
-    (** Here I need to instantiate all of the polymorphic constants in
-     ** [fv] and wrap [body_code] with
-     **     polymorphic_instantiations ; body_code
-     ** Since body_code references these constants using the environment,
-     ** I need to build a closure and invoke it.
-     **)
+    (* Here we instantiate all of the polymorphic constants in
+     * [fv] and wrap [body_code] with
+     *     polymorphic_instantiations ; body_code
+     * Since body_code references these constants using the environment,
+     * we need to build a closure and invoke it.
+     *)
     let reloc_final =
       if for_closure then comp_env_fun 0
       else empty_comp_env ()
@@ -958,16 +983,19 @@ let compile_constant_body fail_on_error env univs = function
       in
       match kind_of_term body with
       | Const (kn',u) when is_univ_copy instance_size u ->
-	(* we use the canonical name of the constant*)
+	(* we use the canonical name of the constant *)
 	let con = constant_of_kn (canonical_con kn') in
         Some (BCalias (get_alias env con))
       | _ ->
 	let res =
           compile_term fail_on_error env true instance_size body [Kreturn 1] in
+        (* This function wraps body_code with a closure so that it
+         * stores all of the free variables.
+         *)
 	let wrap (body_code, fvs) =
           let body_label = Label.create () in
 	  let wrapped_body_code =
-            (* up_to essentially copies the environment *)
+            (* up_to copies the environment *)
             up_to (List.length fvs)
               (Kclosure (body_label, List.length fvs) ::
 	       Kstop :: Krestart ::

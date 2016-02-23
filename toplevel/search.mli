@@ -56,6 +56,16 @@ type search_constraint =
   | In_Module of string list
   (** Bypass the Search blacklist *)
   | Include_Blacklist
+  (** Combinators **)
+  | Not of search_constraint
+  | And of search_constraint * search_constraint
+  | Or of search_constraint * search_constraint
+  | True
+  | False
+
+val all_of : search_constraint list -> search_constraint
+val any_of : search_constraint list -> search_constraint
+val toggle : bool -> search_constraint -> search_constraint
 
 type 'a coq_object = {
   coq_object_prefix : string list;
@@ -63,8 +73,15 @@ type 'a coq_object = {
   coq_object_object : 'a;
 }
 
-val interface_search : (search_constraint * bool) list ->
-  string coq_object list
+val compile : search_constraint -> filter_function
+
+type ('a,'b) result_stream =
+  ('a -> 'b -> 'b) -> 'b -> 'b
+
+val result_to_list : ('a,'a list) result_stream -> 'a list
+
+val interface_search : search_constraint ->
+  (string coq_object, 'a) result_stream
 
 (** {6 Generic search function} *)
 

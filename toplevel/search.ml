@@ -262,12 +262,68 @@ type search_constraint =
   | SubType_Pattern of string
   | In_Module of string list
   | Include_Blacklist
+  | Not of search_constraint
+  | And of search_constraint * search_constraint
+  | Or of search_constraint * search_constraint
+  | True
+  | False
 
 type 'a coq_object = {
   coq_object_prefix : string list;
   coq_object_qualid : string list;
   coq_object_object : 'a;
 }
+
+let opt_search =
+  let opt_and = function False , _ | _ , False -> False
+                       | True , x  | x , True -> x
+                       | x , y -> And (x,y)
+  in
+  let opt_or = function True , _ | _ , True -> True
+                      | False , x | x , False -> x
+                      | x , y -> Or (x,y)
+  in
+  let opt_not = function True -> False
+                       | False -> True
+                       | Not x -> x
+                       | x -> Not x
+  in
+  let rec opt_search = function
+      And (a,b) -> opt_and (opt_search a) (opt_search b)
+    | Or (a,b) -> opt_or (opt_search a) (opt_search b)
+    | Not a -> opt_not (opt_search a)
+    | x -> x
+  in
+  opt_search
+
+let toggle b s =
+  if b then Not s else s
+let rec all_of = function
+    [] -> True
+  | [x] -> x
+  | x :: xs -> And (x, all_of xs)
+let rec any_of = function
+    [] -> False
+  | [x] -> x
+  | x :: xs -> Or (x, any_of xs)
+
+let rec compile = function
+  | Not x ->
+    let f = compile x in
+    fun x -> not (f x)
+  | And (a,b) ->
+    let f = compile a in
+    let g = compile b in
+    fun x -> f x && g x
+  | Or (a,b) ->
+    let f = compile a in
+    let g = compile b in
+    fun x -> f x || g x
+  | True -> fun x -> true
+  | False -> fun x -> false
+  | 
+    
+
 
 let interface_search flags =
   let env = Global.env () in

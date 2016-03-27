@@ -12,12 +12,19 @@ open Term
 open Environ
 open Pattern
 open Globnames
+open CStream
 
 (** {6 Search facilities. } *)
 
 type glob_search_about_item =
   | GlobSearchSubPattern of constr_pattern
   | GlobSearchString of string
+
+type internal_result =
+{ glob_ref : global_reference
+; environ : env
+; constr : constr
+}
 
 type filter_function = global_reference -> env -> constr -> bool
 type display_function = global_reference -> env -> constr -> unit
@@ -45,15 +52,19 @@ val search_pattern : int option -> constr_pattern -> DirPath.t list * bool -> st
 val search_about   : int option -> (bool * glob_search_about_item) list
   -> DirPath.t list * bool -> std_ppcmds
 
+val string_to_constr_pattern : ?env:env -> string -> constr_pattern
+
+val string_list_to_dirpath : string list -> Names.DirPath.t
+
 type search_constraint =
-  (** Whether the name satisfies a regexp (uses Ocaml Str syntax) *)
-  | Name_Pattern of string
+  (** Whether the name satisfies a regexp *)
+  | Name_Pattern of Str.regexp
   (** Whether the object type satisfies a pattern *)
-  | Type_Pattern of string
+  | Type_Pattern of constr_pattern
   (** Whether some subtype of object type satisfies a pattern *)
-  | SubType_Pattern of string
+  | SubType_Pattern of constr_pattern
   (** Whether the object pertains to a module *)
-  | In_Module of string list
+  | In_Module of Names.DirPath.t
   (** Bypass the Search blacklist *)
   | Include_Blacklist
   (** Combinators **)
@@ -75,16 +86,16 @@ type 'a coq_object = {
 
 val compile : search_constraint -> filter_function
 
-type ('a,'b) result_stream =
-  ('a -> 'b -> 'b) -> 'b -> 'b
+val interface_search : filter_function ->
+  (string coq_object) list
 
-val result_to_list : ('a,'a list) result_stream -> 'a list
+val interface_search_stream : filter_function ->
+  (string coq_object, 'a) stream
 
-val interface_search : search_constraint ->
-  (string coq_object, 'a) result_stream
 
 (** {6 Generic search function} *)
 
 val generic_search : int option -> display_function -> unit
+val generic_search_stream : int option -> (global_reference -> env -> constr -> ('b,'a) stream -> ('b,'a) stream) -> ('b, 'a) stream
 (** This function iterates over all hypothesis of the goal numbered
     [glnum] (if present) and all known declarations. *)

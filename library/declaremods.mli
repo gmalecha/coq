@@ -117,6 +117,8 @@ val declare_include :
 val iter_all_segments :
   (Libnames.object_name -> Libobject.obj -> unit) -> unit
 
+val stream_all_segments :
+  (Libnames.object_name * Libobject.obj, 'b) CStream.stream
 
 val debug_print_modtab : unit -> Pp.std_ppcmds
 

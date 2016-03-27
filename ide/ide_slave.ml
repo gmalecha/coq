@@ -282,16 +282,21 @@ let export_coq_object t = {
 }
 
 let import_search_constraint = function
-  | Interface.Name_Pattern s    -> Search.Name_Pattern s
-  | Interface.Type_Pattern s    -> Search.Type_Pattern s
-  | Interface.SubType_Pattern s -> Search.SubType_Pattern s
-  | Interface.In_Module ms      -> Search.In_Module ms
+  | Interface.Name_Pattern s    -> Search.Name_Pattern (Str.regexp s)
+  | Interface.Type_Pattern s    -> Search.Type_Pattern (Search.string_to_constr_pattern s)
+  | Interface.SubType_Pattern s -> Search.SubType_Pattern (Search.string_to_constr_pattern s)
+  | Interface.In_Module ms      -> Search.In_Module (Search.string_list_to_dirpath ms)
   | Interface.Include_Blacklist -> Search.Include_Blacklist
 
 let search flags =
-  List.map export_coq_object (Search.interface_search (
-    List.map (fun (c, b) -> (import_search_constraint c, b)) flags)
-  )
+  let flags =
+    Search.all_of
+      (List.map (fun (c, b) -> Search.toggle b (import_search_constraint c))
+         flags)
+  in
+  let strm =
+    Search.interface_search (Search.compile flags) in
+  List.map export_coq_object strm
 
 let export_option_value = function
   | Goptions.BoolValue b   -> Interface.BoolValue b

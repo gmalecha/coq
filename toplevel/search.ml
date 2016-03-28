@@ -85,17 +85,16 @@ let iter_constructors indsp u fn env nconstr =
     fn (ConstructRef (indsp, i)) env typ
   done
 
-let stream_constructors (type a) (type b) indsp u (fn : _ -> _ -> _ -> (a,b) stream -> (a,b) stream) env nconstr after =
+let stream_constructors (type a) indsp u (fn : _ -> _ -> _ -> a stream -> a stream) env nconstr after =
   let rec stream_constructors i =
     if i > nconstr then
       after
     else
       let typ = Inductiveops.type_of_constructor env ((indsp, i), u) in
       fn (ConstructRef (indsp, i)) env typ
-        (fun cons nil -> stream_constructors (i+1) cons nil)
+        (stream_constructors (i+1))
   in
-  fun cons nil ->
-    stream_constructors 1 cons nil
+  stream_constructors 1
 
 let iter_named_context_name_type f =
   let open Context.Named.Declaration in
@@ -114,7 +113,7 @@ let stream_named_context_name_type f x =
   List.fold_right (fun decl acc ->
       f (get_id decl) (get_type decl) acc) x
 
-let stream_hypothesis glnum (fn : global_reference -> env -> constr -> ('a,'b) stream -> ('a,'b) stream) =
+let stream_hypothesis glnum (fn : global_reference -> env -> constr -> 'a stream -> 'a stream) =
   let env = Global.env () in
   let iter_hyp idh typ = fn (VarRef idh) env typ in
   let evmap,e = Pfedit.get_goal_context glnum in
@@ -155,22 +154,24 @@ let iter_declarations (fn : global_reference -> env -> constr -> unit) =
   try Declaremods.iter_all_segments iter_obj
   with Not_found -> ()
 
-let stream_flat_map_c (type a) (type b) (type c)
-    (f : a -> (b,c) stream -> (b,c) stream)
-: (a,c) stream -> (b,c) stream =
-  let rec stream_flat_map (s : (a,c) stream) : (b,c) stream =
-    fun cons nil ->
-      s (fun x xs -> f x (stream_flat_map xs) cons nil)
-        nil
+let stream_flat_map_c (type a) (type b)
+    (f : a -> b stream -> b stream)
+: a stream -> b stream =
+  let open CStream in
+  let rec stream_flat_map (s : a stream) : b stream =
+    { stream_run =
+        fun cons nil ->
+          s.stream_run
+            (fun x xs -> (f x (stream_flat_map xs)).stream_run cons nil)
+            nil }
   in
   stream_flat_map
 
 (* General search over declarations *)
-let stream_declarations : type a b. (_ -> _ -> _ -> (b,a) stream -> (b,a) stream) -> (b,a) stream =
-  fun fn ->
+let stream_declarations fn =
   let open Context.Named.Declaration in
   let env = Global.env () in
-  let iter_obj ((sp, kn), lobj) =
+  let iter_obj (sp, kn) lobj =
     match object_tag lobj with
   | "VARIABLE" -> begin
     match try Some (Global.lookup_named (basename sp))
@@ -192,29 +193,28 @@ let stream_declarations : type a b. (_ -> _ -> _ -> (b,a) stream -> (b,a) stream
       let u = Declareops.inductive_instance mib in
       let i = (ind, u) in
       let typ = Inductiveops.type_of_inductive env i in
-        fn (IndRef ind) env typ
-          (fun cons nil -> let len = Array.length mip.mind_user_lc in
-           stream_constructors ind u fn env len after cons nil)
+      fn (IndRef ind) env typ
+        (let len = Array.length mip.mind_user_lc in
+         stream_constructors ind u fn env len after)
     in
     Array.fold_right_i iter_packet mib.mind_packets
   | _ -> fun x -> x
   in
-  stream_flat_map_c iter_obj Declaremods.stream_all_segments
+  Declaremods.stream_all_segments iter_obj stream_done
 
 let generic_search glnumopt fn =
   (match glnumopt with
   | None -> ()
-  | Some glnum ->  iter_hypothesis glnum fn);
+  | Some glnum -> iter_hypothesis glnum fn);
   iter_declarations fn
 
-let generic_search_stream : type a b. int option -> (global_reference -> env -> constr -> (a,b) stream -> (a,b) stream) -> (a, b) stream =
-  fun glnumopt fn ->
-    let hyps = match glnumopt with
-      | None -> fun x -> x
-      | Some glnum ->
-        stream_hypothesis glnum fn
-    in
-    hyps (stream_declarations fn)
+let generic_search_stream glnumopt fn =
+  let hyps = match glnumopt with
+    | None -> fun x -> x
+    | Some glnum ->
+      stream_hypothesis glnum fn
+  in
+  hyps (stream_declarations fn)
 
 
 (** Standard display *)
@@ -355,7 +355,7 @@ let search_about gopt items mods =
   in
   let () = generic_search gopt iter in
   format_display !ans
-  *) 
+  *)
 type search_constraint =
   | Name_Pattern of Str.regexp
   | Type_Pattern of constr_pattern
@@ -484,7 +484,7 @@ let print_function { glob_ref = gref ; environ = env ; constr = constr }
   }
 
 let interface_search_stream (filter_function : filter_function)
-: (string coq_object, 'a) stream =
+: (string coq_object) stream =
   stream_map print_function
     (generic_search_stream None
        (fun a b c -> if filter_function a b c then
@@ -492,68 +492,6 @@ let interface_search_stream (filter_function : filter_function)
          else fun x -> x))
 
 let interface_search (filter_function : filter_function) =
-(*  let env = Global.env () in
-  let rec extract_flags name tpe subtpe mods blacklist = function
-  | [] -> (name, tpe, subtpe, mods, blacklist)
-  | (Name_Pattern s, b) :: l ->
-    let regexp =
-      try Str.regexp s
-      with e when Errors.noncritical e ->
-        Errors.errorlabstrm "Search.interface_search"
-          (str "Invalid regexp: " ++ str s)
-    in
-    extract_flags ((regexp, b) :: name) tpe subtpe mods blacklist l
-  | (Type_Pattern s, b) :: l ->
-    let constr = Pcoq.parse_string Pcoq.Constr.lconstr_pattern s in
-    let (_, pat) = Constrintern.intern_constr_pattern env constr in
-    extract_flags name ((pat, b) :: tpe) subtpe mods blacklist l
-  | (SubType_Pattern s, b) :: l ->
-    let constr = Pcoq.parse_string Pcoq.Constr.lconstr_pattern s in
-    let (_, pat) = Constrintern.intern_constr_pattern env constr in
-    extract_flags name tpe ((pat, b) :: subtpe) mods blacklist l
-  | (In_Module m, b) :: l ->
-    let path = String.concat "." m in
-    let m = Pcoq.parse_string Pcoq.Constr.global path in
-    let (_, qid) = Libnames.qualid_of_reference m in
-    let id =
-      try Nametab.full_name_module qid
-      with Not_found ->
-        Errors.errorlabstrm "Search.interface_search"
-          (str "Module " ++ str path ++ str " not found.")
-    in
-    extract_flags name tpe subtpe ((id, b) :: mods) blacklist l
-  | (Include_Blacklist, b) :: l ->
-    extract_flags name tpe subtpe mods b l
-  in
-  let (name, tpe, subtpe, mods, blacklist) =
-    extract_flags [] [] [] [] false flags
-  in
-  let filter_function ref env constr =
-    let id = Names.Id.to_string (Nametab.basename_of_global ref) in
-    let path = Libnames.dirpath (Nametab.path_of_global ref) in
-    let toggle x b = if x then b else not b in
-    let match_name (regexp, flag) =
-      toggle (Str.string_match regexp id 0) flag
-    in
-    let match_type (pat, flag) =
-      toggle (Constr_matching.is_matching env Evd.empty pat constr) flag
-    in
-    let match_subtype (pat, flag) =
-      toggle
-        (Constr_matching.is_matching_appsubterm ~closed:false 
-	   env Evd.empty pat constr) flag
-    in
-    let match_module (mdl, flag) =
-      toggle (Libnames.is_dirpath_prefix_of mdl path) flag
-    in
-    let in_blacklist =
-      blacklist || (blacklist_filter ref env constr)
-    in
-    List.for_all match_name name &&
-    List.for_all match_type tpe &&
-    List.for_all match_subtype subtpe &&
-    List.for_all match_module mods && in_blacklist
-  in *)
   let ans = ref [] in
   let print_function ref env constr =
     let fullpath = DirPath.repr (Nametab.dirpath_of_global ref) in
@@ -594,12 +532,14 @@ let plain_display_simple ref env c =
   end
 
 let format_display_stream
-    (x : (_,Pp.std_ppcmds) stream) : Pp.std_ppcmds =
+    (x : _ stream) : Pp.std_ppcmds =
   let rec format_display_stream acc xs =
-    xs (fun x xs -> format_display_stream (fun z -> Pp.fnl() ++ x ++ acc z) xs)
+    xs.stream_run
+      (fun x xs -> format_display_stream (fun z -> Pp.fnl() ++ x ++ acc z) xs)
       (fun _ -> acc Pp.mt)
   in
-  x (fun x xs -> format_display_stream (fun z -> x ++ z ()) xs)
+  x.stream_run
+    (fun x xs -> format_display_stream (fun z -> x ++ z ()) xs)
     (fun _ -> Pp.mt ())
 
 let search_about_stream gopt items mods =

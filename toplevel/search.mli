@@ -90,12 +90,12 @@ val interface_search : filter_function ->
   (string coq_object) list
 
 val interface_search_stream : filter_function ->
-  (string coq_object, 'a) stream
+  (string coq_object) stream
 
 
 (** {6 Generic search function} *)
 
 val generic_search : int option -> display_function -> unit
-val generic_search_stream : int option -> (global_reference -> env -> constr -> ('b,'a) stream -> ('b,'a) stream) -> ('b, 'a) stream
+val generic_search_stream : int option -> (global_reference -> env -> constr -> 'b stream -> 'b stream) -> 'b stream
 (** This function iterates over all hypothesis of the goal numbered
     [glnum] (if present) and all known declarations. *)

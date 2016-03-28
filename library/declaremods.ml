@@ -952,28 +952,30 @@ let iter_all_segments f =
   MPmap.iter apply_mod_obj (ModObjs.all ());
   List.iter apply_node (Lib.contents ())
 
-let stream_all_segments (type b)
-(* : (Libnames.object_name * Libobject.obj,b) stream *) =
+let stream_all_segments
+    (f : Libnames.object_name -> Libobject.obj -> 'a stream -> 'a stream)
+    (after : 'a stream) : 'a stream =
   let rec apply_obj prefix (id,obj) after =
     match object_tag obj with
     | "INCLUDE" ->
       let objs = expand_aobjs (out_include obj) in
       stream_of_list_flat (apply_obj prefix) objs after
-    | _ -> stream_yield_then (make_oname prefix id, obj) after
+    | _ -> f (make_oname prefix id) obj after
   in
-  let apply_mod_obj _ (prefix,substobjs,keepobjs) str
-  : (Libnames.object_name * Libobject.obj, b) stream =
+  let apply_mod_obj _ (prefix,substobjs,keepobjs) after
+  : _ stream =
     stream_of_list_flat (apply_obj prefix) substobjs
-      (fun cons nil -> stream_of_list_flat (apply_obj prefix) keepobjs str cons nil)
+      (stream_of_list_flat (apply_obj prefix) keepobjs after)
   in
-  let apply_node = function
-    | sp, Lib.Leaf o -> stream_yield_then (sp, o)
-    | _ -> fun x -> x
+  let apply_node x after =
+    match x with
+    | sp, Lib.Leaf o -> f sp o after
+    | _ -> after
   in
-  fun cons nil ->
-  MPmap.fold_right apply_mod_obj
-    (ModObjs.all ())
-    (stream_of_list_flat apply_node (Lib.contents ()) stream_done) cons nil
+  { stream_run = fun cons nil ->
+        (MPmap.fold_right apply_mod_obj
+          (ModObjs.all ())
+          (stream_of_list_flat apply_node (Lib.contents ()) after)).stream_run cons nil }
 
 (** {6 Some types used to shorten declaremods.mli} *)
 

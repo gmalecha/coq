@@ -8,6 +8,7 @@
 
 open Names
 open Vernacexpr
+open CStream
 
 (** {6 Modules } *)
 
@@ -118,7 +119,8 @@ val iter_all_segments :
   (Libnames.object_name -> Libobject.obj -> unit) -> unit
 
 val stream_all_segments :
-  (Libnames.object_name * Libobject.obj, 'b) CStream.stream
+  (Libnames.object_name -> Libobject.obj -> 'a stream -> 'a stream) ->
+  'a stream -> 'a stream
 
 val debug_print_modtab : unit -> Pp.std_ppcmds
 

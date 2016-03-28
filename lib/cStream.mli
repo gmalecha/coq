@@ -6,6 +6,8 @@ val stream_map : ('a -> 'b) -> 'a stream -> 'b stream
 val stream_append : 'a stream -> 'a stream -> 'a stream
 
 val stream_to_list : ?limit:int -> 'a stream -> 'a list
+val stream_of_array : (int -> 'a -> 'b stream -> 'b stream) ->
+  'a array -> 'b stream -> 'b stream
 
 val stream_filter : ('a -> bool) -> 'a stream -> 'a stream
 

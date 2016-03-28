@@ -20,12 +20,6 @@ type glob_search_about_item =
   | GlobSearchSubPattern of constr_pattern
   | GlobSearchString of string
 
-type internal_result =
-{ glob_ref : global_reference
-; environ : env
-; constr : constr
-}
-
 type filter_function = global_reference -> env -> constr -> bool
 type display_function = global_reference -> env -> constr -> unit
 
@@ -81,7 +75,8 @@ val toggle : bool -> search_constraint -> search_constraint
 type 'a coq_object = {
   coq_object_prefix : string list;
   coq_object_qualid : string list;
-  coq_object_object : 'a;
+  coq_object_object : global_reference;
+  coq_object_extra  : 'a
 }
 
 val compile : search_constraint -> filter_function
@@ -90,12 +85,14 @@ val interface_search : filter_function ->
   (string coq_object) list
 
 val interface_search_stream : filter_function ->
-  (string coq_object) stream
+  (constr coq_object) stream
 
 
 (** {6 Generic search function} *)
 
 val generic_search : int option -> display_function -> unit
-val generic_search_stream : int option -> (global_reference -> env -> constr -> 'b stream -> 'b stream) -> 'b stream
+val generic_search_stream : int option ->
+  (global_reference -> env -> constr -> 'b stream -> 'b stream) ->
+  'b stream
 (** This function iterates over all hypothesis of the goal numbered
     [glnum] (if present) and all known declarations. *)

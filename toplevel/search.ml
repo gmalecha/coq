@@ -24,12 +24,6 @@ open CStream
 type filter_function = global_reference -> env -> constr -> bool
 type display_function = global_reference -> env -> constr -> unit
 
-type internal_result =
-{ glob_ref : global_reference
-; environ : env
-; constr : constr
-}
-
 (* This option restricts the output of [SearchPattern ...],
 [SearchAbout ...], etc. to the names of the symbols matching the
 query, separated by a newline. This type of output is useful for
@@ -171,20 +165,20 @@ let stream_flat_map_c (type a) (type b)
 let stream_declarations fn =
   let open Context.Named.Declaration in
   let env = Global.env () in
-  let iter_obj (sp, kn) lobj =
+  let iter_obj (sp, kn) lobj after =
     match object_tag lobj with
   | "VARIABLE" -> begin
     match try Some (Global.lookup_named (basename sp))
           with Not_found -> None
     with
-    | None -> fun x -> x
-    | Some decl -> fn (VarRef (get_id decl)) env (get_type decl)
+    | None -> after
+    | Some decl -> fn (VarRef (get_id decl)) env (get_type decl) after
     end
   | "CONSTANT" ->
     let cst = Global.constant_of_delta_kn kn in
     let gr = ConstRef cst in
     let typ = Global.type_of_global_unsafe gr in
-    fn gr env typ
+    fn gr env typ after
   | "INDUCTIVE" ->
     let mind = Global.mind_of_delta_kn kn in
     let mib = Global.lookup_mind mind in
@@ -197,8 +191,8 @@ let stream_declarations fn =
         (let len = Array.length mip.mind_user_lc in
          stream_constructors ind u fn env len after)
     in
-    Array.fold_right_i iter_packet mib.mind_packets
-  | _ -> fun x -> x
+    stream_of_array iter_packet mib.mind_packets after
+  | _ -> after
   in
   Declaremods.stream_all_segments iter_obj stream_done
 
@@ -380,7 +374,8 @@ let string_list_to_dirpath m =
 type 'a coq_object = {
   coq_object_prefix : string list;
   coq_object_qualid : string list;
-  coq_object_object : 'a;
+  coq_object_object : global_reference;
+  coq_object_extra : 'a;
 }
 
 let opt_search =
@@ -457,12 +452,7 @@ let rec compile = function
   | Include_Blacklist ->
     blacklist_filter
 
-let filter_function_to_internal_filter (f : filter_function)
-  (i : internal_result) : bool =
-  f i.glob_ref i.environ i.constr
-
-let print_function { glob_ref = gref ; environ = env ; constr = constr }
-: string coq_object =
+let print_function gref env constr : constr coq_object =
   let fullpath = DirPath.repr (Nametab.dirpath_of_global gref) in
   let qualid = Nametab.shortest_qualid_of_global Id.Set.empty gref in
   let (shortpath, basename) = Libnames.repr_qualid qualid in
@@ -480,16 +470,17 @@ let print_function { glob_ref = gref ; environ = env ; constr = constr }
   let (prefix, qualid) = prefix fullpath shortpath [Id.to_string basename] in
   { coq_object_prefix = prefix;
     coq_object_qualid = qualid;
-    coq_object_object = string_of_ppcmds (pr_lconstr_env env Evd.empty constr)
+    coq_object_object = gref;
+    coq_object_extra  = constr (* string_of_ppcmds (pr_lconstr_env env Evd.empty constr) *)
   }
 
 let interface_search_stream (filter_function : filter_function)
-: (string coq_object) stream =
-  stream_map print_function
-    (generic_search_stream None
-       (fun a b c -> if filter_function a b c then
-           stream_yield_then { glob_ref = a ; environ = b ; constr = c }
-         else fun x -> x))
+: (constr coq_object) stream =
+  generic_search_stream None
+    (fun gl e c after ->
+       if filter_function gl e c then
+         stream_yield_then (print_function gl e c) after
+       else after)
 
 let interface_search (filter_function : filter_function) =
   let ans = ref [] in
@@ -512,7 +503,8 @@ let interface_search (filter_function : filter_function) =
     let answer = {
       coq_object_prefix = prefix;
       coq_object_qualid = qualid;
-      coq_object_object = string_of_ppcmds (pr_lconstr_env env Evd.empty constr);
+      coq_object_object = ref;
+      coq_object_extra  = string_of_ppcmds (pr_lconstr_env env Evd.empty constr);
     } in
     ans := answer :: !ans;
   in

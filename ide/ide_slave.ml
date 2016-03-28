@@ -278,7 +278,7 @@ let status force =
 let export_coq_object t = {
   Interface.coq_object_prefix = t.Search.coq_object_prefix;
   Interface.coq_object_qualid = t.Search.coq_object_qualid;
-  Interface.coq_object_object = t.Search.coq_object_object
+  Interface.coq_object_object = t.Search.coq_object_extra
 }
 
 let import_search_constraint = function

@@ -76,6 +76,17 @@ let stream_to_list =
     | Some n -> some_to_list n
   in result_to_list
 
+let stream_of_array f a s =
+  let len = Array.length a in
+  let rec iter i after =
+    if i >= len then
+      after
+    else
+      f i (Array.unsafe_get a i)
+        { stream_run = fun cons nil ->
+              (iter (i+1) after).stream_run cons nil }
+  in iter 0 s
+
 let stream_of_list (type a) (ls : a list) (str : a stream)
 : a stream =
   let rec consume (ls : a list) =

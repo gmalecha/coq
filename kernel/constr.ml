@@ -487,35 +487,105 @@ let map_with_binders g f l c0 = match kind c0 with
    optimisation that physically equal arrays are equals (hence the
    calls to {!Array.equal_norefl}). *)
 
-let compare_head_gen_leq_with kind1 kind2 eq_universes leq_sorts eq leq t1 t2 =
-  match kind1 t1, kind2 t2 with
-  | Rel n1, Rel n2 -> Int.equal n1 n2
-  | Meta m1, Meta m2 -> Int.equal m1 m2
-  | Var id1, Var id2 -> Id.equal id1 id2
+type equiv =
+  | Yes
+  | No
+  | Unif
+
+let (&&&) x y =
+  match x with
+  | No -> No
+  | Unif -> Lazy.force y
+  | Yes ->
+    match Lazy.force y with
+    | Unif -> Yes
+    | y -> y
+
+let (|||) x y =
+  match x with
+  | No -> Lazy.force y
+  | _ -> x
+
+let for_all_unif cmp xs ys =
+  let l = Array.length xs in
+  let l' = Array.length ys in
+  if l = l' then
+    let rec run i acc =
+      if i >= l then acc
+      else
+        match cmp xs.(i) ys.(i) with
+        | No -> No
+        | Yes -> run (i+1) Yes
+        | Unif -> run (i+1) acc
+    in
+    run 0 Unif
+  else
+    No
+
+let bool_to_equiv yes = function true -> Yes
+                               | false -> No
+
+let equiv_to_bool = function No -> false
+                           | _ -> true
+
+let no_unif = function Unif -> Yes
+                     | x -> x
+
+external caml_unify : 'a -> int -> 'b -> int -> unit = "caml__unify"
+
+let check_unify (type a) (type b) (a : a) (x: b) (b : a) (y:b) i
+  = function Unif -> caml_unify a i b i ; Unif
+           | x -> x
+
+let compare_head_gen_leq_with kind1 kind2 eq_universes leq_sorts eq leq t1i t2i =
+  match kind1 t1i, kind2 t2i with
+  | Rel n1, Rel n2 -> bool_to_equiv Unif (Int.equal n1 n2)
+  | Meta m1, Meta m2 -> bool_to_equiv Unif (Int.equal m1 m2)
+  | Var id1, Var id2 -> bool_to_equiv Unif (Id.equal id1 id2)
   | Sort s1, Sort s2 -> leq_sorts s1 s2
-  | Cast (c1,_,_), _ -> leq c1 t2
-  | _, Cast (c2,_,_) -> leq t1 c2
-  | Prod (_,t1,c1), Prod (_,t2,c2) -> eq t1 t2 && leq c1 c2
-  | Lambda (_,t1,c1), Lambda (_,t2,c2) -> eq t1 t2 && eq c1 c2
-  | LetIn (_,b1,t1,c1), LetIn (_,b2,t2,c2) -> eq b1 b2 && eq t1 t2 && leq c1 c2
-  | App (Cast(c1, _, _),l1), _ -> leq (mkApp (c1,l1)) t2
-  | _, App (Cast (c2, _, _),l2) -> leq t1 (mkApp (c2,l2))
+  | Cast (c1,_,_), _ -> no_unif (leq c1 t2i)
+  | _, Cast (c2,_,_) -> no_unif (leq t1i c2)
+  | Prod (_,t1,c1), Prod (_,t2,c2) ->
+    check_unify t1i t1 t2i t2 1 (eq t1 t2) &&&
+    lazy (leq c1 c2)
+  | Lambda (_,t1,c1), Lambda (_,t2,c2) ->
+    check_unify t1i t1 t2i t2 1 (eq t1 t2) &&&
+    lazy (check_unify t1i c1 t2i c2 2 (eq c1 c2))
+  | LetIn (_,b1,t1,c1), LetIn (_,b2,t2,c2) ->
+    check_unify t1i b1 t2i b2 1 (eq b1 b2) &&&
+    lazy (check_unify t1i t1 t2i t2 2 (eq t1 t2) &&&
+          lazy (leq c1 c2))
+  | App (Cast(c1, _, _),l1), _ -> no_unif (leq (mkApp (c1,l1)) t2i)
+  | _, App (Cast (c2, _, _),l2) -> no_unif (leq t1i (mkApp (c2,l2)))
   | App (c1,l1), App (c2,l2) ->
-      Int.equal (Array.length l1) (Array.length l2) &&
-        eq c1 c2 && Array.equal_norefl eq l1 l2
-  | Proj (p1,c1), Proj (p2,c2) -> Projection.equal p1 p2 && eq c1 c2
-  | Evar (e1,l1), Evar (e2,l2) -> Evar.equal e1 e2 && Array.equal eq l1 l2
-  | Const (c1,u1), Const (c2,u2) -> eq_constant c1 c2 && eq_universes true u1 u2
-  | Ind (c1,u1), Ind (c2,u2) -> eq_ind c1 c2 && eq_universes false u1 u2
-  | Construct (c1,u1), Construct (c2,u2) -> eq_constructor c1 c2 && eq_universes false u1 u2
+      bool_to_equiv Unif (Int.equal (Array.length l1) (Array.length l2)) &&&
+      lazy (check_unify t1i c1 t2i c2 0 (eq c1 c2) &&&
+            lazy (for_all_unif eq l1 l2))
+(**       check_unify t1i c1 t2i c2 1 (Array.equal_norefl eq l1 l2) **)
+  | Proj (p1,c1), Proj (p2,c2) ->
+    bool_to_equiv Unif (Projection.equal p1 p2) &&&
+    lazy (check_unify t1i c1 t2i c2 1 (eq c1 c2))
+  | Evar (e1,l1), Evar (e2,l2) ->
+    bool_to_equiv Yes (Evar.equal e1 e2) &&& lazy (for_all_unif eq l1 l2)
+  | Const (c1,u1), Const (c2,u2) ->
+    bool_to_equiv Unif (eq_constant c1 c2) &&& lazy (eq_universes true u1 u2)
+  | Ind (c1,u1), Ind (c2,u2) ->
+    bool_to_equiv Unif (eq_ind c1 c2) &&& lazy (eq_universes false u1 u2)
+  | Construct (c1,u1), Construct (c2,u2) ->
+    bool_to_equiv Unif (eq_constructor c1 c2) &&&
+    lazy (eq_universes false u1 u2)
   | Case (_,p1,c1,bl1), Case (_,p2,c2,bl2) ->
-      eq p1 p2 && eq c1 c2 && Array.equal eq bl1 bl2
+      check_unify t1i p1 t2i p2 1 (eq p1 p2) &&&
+      lazy (check_unify t1i c1 t2i c2 2 (eq c1 c2) &&&
+            lazy (for_all_unif eq bl1 bl2))
   | Fix ((ln1, i1),(_,tl1,bl1)), Fix ((ln2, i2),(_,tl2,bl2)) ->
-      Int.equal i1 i2 && Array.equal Int.equal ln1 ln2
-      && Array.equal_norefl eq tl1 tl2 && Array.equal_norefl eq bl1 bl2
+      bool_to_equiv Unif (Int.equal i1 i2) &&&
+      lazy (bool_to_equiv Unif (Array.equal Int.equal ln1 ln2)
+            &&& lazy (for_all_unif eq tl1 tl2 &&& lazy (for_all_unif eq bl1 bl2)))
   | CoFix(ln1,(_,tl1,bl1)), CoFix(ln2,(_,tl2,bl2)) ->
-      Int.equal ln1 ln2 && Array.equal_norefl eq tl1 tl2 && Array.equal_norefl eq bl1 bl2
-  | _ -> false
+      bool_to_equiv Unif (Int.equal ln1 ln2) &&&
+      lazy (for_all_unif eq tl1 tl2 &&& lazy (for_all_unif eq bl1 bl2))
+  | _ -> bool_to_equiv Unif false
 
 (* [compare_head_gen_leq u s eq leq c1 c2] compare [c1] and [c2] using [eq] to compare
    the immediate subterms of [c1] of [c2] for conversion if needed, [leq] for cumulativity,
@@ -523,8 +593,21 @@ let compare_head_gen_leq_with kind1 kind2 eq_universes leq_sorts eq leq t1 t2 =
    application associativity, binders name and Cases annotations are
    not taken into account *)
 
+let compare_head_gen_leq_equiv eq_universes leq_sorts eq leq t1 t2 =
+  compare_head_gen_leq_with kind kind
+    eq_universes
+    leq_sorts
+    eq
+    leq
+    t1 t2
+
 let compare_head_gen_leq eq_universes leq_sorts eq leq t1 t2 =
-  compare_head_gen_leq_with kind kind  eq_universes leq_sorts eq leq t1 t2
+  equiv_to_bool (compare_head_gen_leq_equiv
+                   (fun z x y -> bool_to_equiv Yes (eq_universes z x y))
+                   (fun x y -> bool_to_equiv Yes (leq_sorts x y))
+                   (fun x y -> bool_to_equiv Yes (eq x y))
+                   (fun x y -> bool_to_equiv Yes (leq x y))
+                   t1 t2)
 
 (* [compare_head_gen u s f c1 c2] compare [c1] and [c2] using [f] to
    compare the immediate subterms of [c1] of [c2] if needed, [u] to
@@ -536,12 +619,36 @@ let compare_head_gen_leq eq_universes leq_sorts eq leq t1 t2 =
    to expose subterms of [c1] and [c2], as arguments. *)
 
 let compare_head_gen_with kind1 kind2 eq_universes eq_sorts eq t1 t2 =
-  compare_head_gen_leq_with kind1 kind2 eq_universes eq_sorts eq eq t1 t2
+  equiv_to_bool (compare_head_gen_leq_with kind1 kind2
+                   (fun z x y -> bool_to_equiv Yes (eq_universes z x y))
+                   (fun x y -> bool_to_equiv Yes (eq_sorts x y))
+                   (fun x y -> bool_to_equiv Yes (eq x y))
+                   (fun x y -> bool_to_equiv Yes (eq x y))
+                   t1 t2)
 
 let compare_head_gen eq_universes eq_sorts eq t1 t2 =
-  compare_head_gen_leq eq_universes eq_sorts eq eq t1 t2
+  compare_head_gen_leq
+    eq_universes
+    eq_sorts
+    eq eq
+    t1 t2
 
-let compare_head = compare_head_gen (fun _ -> Univ.Instance.equal) Sorts.equal
+let compare_head_gen_equiv eq_universes eq_sorts eq t1 t2 =
+  compare_head_gen_leq_equiv
+    eq_universes
+    eq_sorts
+    eq
+    eq
+    t1 t2
+
+
+let inst_unif _ x y = bool_to_equiv Yes (Univ.Instance.equal x y)
+
+let sort_equiv a b =
+  bool_to_equiv Yes (Sorts.equal a b)
+
+let compare_head eq x y =
+  equiv_to_bool (compare_head_gen_equiv inst_unif sort_equiv (fun x y -> bool_to_equiv Yes (eq x y)) x y)
 
 (*******************************)
 (*  alpha conversion functions *)
@@ -549,91 +656,132 @@ let compare_head = compare_head_gen (fun _ -> Univ.Instance.equal) Sorts.equal
 
 (* alpha conversion : ignore print names and casts *)
 
-let rec eq_constr m n =
-  (m == n) || compare_head_gen (fun _ -> Instance.equal) Sorts.equal eq_constr m n
+let rec eq_constr_unif m n =
+  if m == n then Unif
+  else
+    compare_head_gen_equiv inst_unif sort_equiv eq_constr_unif m n
+
+let eq_constr a b =
+  match eq_constr_unif a b with
+  | No -> false
+  | _ -> true
+
 
 let equal m n = eq_constr m n (* to avoid tracing a recursive fun *)
 
 let eq_constr_univs univs m n =
   if m == n then true
-  else 
+  else
     let eq_universes _ = UGraph.check_eq_instances univs in
-    let eq_sorts s1 s2 = s1 == s2 || UGraph.check_eq univs (Sorts.univ_of_sort s1) (Sorts.univ_of_sort s2) in
-    let rec eq_constr' m n = 
-      m == n ||	compare_head_gen eq_universes eq_sorts eq_constr' m n
-    in compare_head_gen eq_universes eq_sorts eq_constr' m n
+    let eq_universes_equiv x a b =
+      bool_to_equiv Yes (eq_universes x a b) in
+    let eq_sorts s1 s2 =
+      if s1 == s2 then Unif
+      else
+        bool_to_equiv Yes (UGraph.check_eq univs (Sorts.univ_of_sort s1) (Sorts.univ_of_sort s2)) in
+    let rec eq_constr' m n =
+      if m == n then Unif
+      else
+        compare_head_gen_equiv eq_universes_equiv eq_sorts eq_constr' m n
+    in equiv_to_bool (compare_head_gen_equiv eq_universes_equiv sort_equiv eq_constr' m n)
+
+
 
 let leq_constr_univs univs m n =
   if m == n then true
-  else 
+  else
     let eq_universes _ = UGraph.check_eq_instances univs in
-    let eq_sorts s1 s2 = s1 == s2 || 
-      UGraph.check_eq univs (Sorts.univ_of_sort s1) (Sorts.univ_of_sort s2) in
-    let leq_sorts s1 s2 = s1 == s2 || 
-      UGraph.check_leq univs (Sorts.univ_of_sort s1) (Sorts.univ_of_sort s2) in
-    let rec eq_constr' m n = 
-      m == n ||	compare_head_gen eq_universes eq_sorts eq_constr' m n
+    let eq_universes_equiv x a b =
+      bool_to_equiv Yes (eq_universes x a b) in
+    let eq_sorts s1 s2 =
+      if s1 == s2 then Unif
+      else
+        bool_to_equiv Yes (UGraph.check_eq univs (Sorts.univ_of_sort s1) (Sorts.univ_of_sort s2)) in
+    let leq_sorts s1 s2 =
+      if s1 == s2 then Unif
+      else
+        bool_to_equiv Yes (UGraph.check_leq univs (Sorts.univ_of_sort s1) (Sorts.univ_of_sort s2)) in
+    let rec eq_constr' m n =
+      if m == n then Unif
+      else
+        compare_head_gen_equiv eq_universes_equiv eq_sorts eq_constr' m n
     in
     let rec compare_leq m n =
-      compare_head_gen_leq eq_universes leq_sorts eq_constr' leq_constr' m n
-    and leq_constr' m n = m == n || compare_leq m n in
-    compare_leq m n
+      compare_head_gen_leq_equiv eq_universes_equiv leq_sorts eq_constr' leq_constr' m n
+    and leq_constr' m n =
+      if m == n then Unif
+      else compare_leq m n in
+    equiv_to_bool (compare_leq m n)
 
 let eq_constr_univs_infer univs m n =
   if m == n then true, Constraint.empty
-  else 
+  else
     let cstrs = ref Constraint.empty in
     let eq_universes strict = UGraph.check_eq_instances univs in
-    let eq_sorts s1 s2 = 
-      if Sorts.equal s1 s2 then true
+    let eq_universes_equiv x a b =
+      bool_to_equiv Yes (eq_universes x a b) in
+    let eq_sorts s1 s2 =
+      if Sorts.equal s1 s2 then bool_to_equiv Unif true
       else
 	let u1 = Sorts.univ_of_sort s1 and u2 = Sorts.univ_of_sort s2 in
-	if UGraph.check_eq univs u1 u2 then true
+	if UGraph.check_eq univs u1 u2 then bool_to_equiv Yes true
 	else
 	  (cstrs := Univ.enforce_eq u1 u2 !cstrs;
-	   true)
+	   bool_to_equiv Yes true)
     in
-    let rec eq_constr' m n = 
-      m == n ||	compare_head_gen eq_universes eq_sorts eq_constr' m n
+    let rec eq_constr' m n =
+      if m == n then Unif
+      else
+        compare_head_gen_equiv eq_universes_equiv eq_sorts eq_constr' m n
     in
-    let res = compare_head_gen eq_universes eq_sorts eq_constr' m n in
-    res, !cstrs
+    let res = compare_head_gen_equiv eq_universes_equiv eq_sorts eq_constr' m n in
+    equiv_to_bool res, !cstrs
 
 let leq_constr_univs_infer univs m n =
   if m == n then true, Constraint.empty
-  else 
+  else
     let cstrs = ref Constraint.empty in
-    let eq_universes strict l l' = UGraph.check_eq_instances univs l l' in
-    let eq_sorts s1 s2 = 
-      if Sorts.equal s1 s2 then true
+    let eq_universes strict l l' =
+      bool_to_equiv Yes (UGraph.check_eq_instances univs l l') in
+    let eq_sorts s1 s2 =
+      if Sorts.equal s1 s2 then bool_to_equiv Unif true
       else
 	let u1 = Sorts.univ_of_sort s1 and u2 = Sorts.univ_of_sort s2 in
-	if UGraph.check_eq univs u1 u2 then true
+	if UGraph.check_eq univs u1 u2 then bool_to_equiv Yes true
 	else (cstrs := Univ.enforce_eq u1 u2 !cstrs;
-	      true)
+	      bool_to_equiv Yes true)
     in
-    let leq_sorts s1 s2 = 
-      if Sorts.equal s1 s2 then true
-      else 
+    let leq_sorts s1 s2 =
+      if Sorts.equal s1 s2 then bool_to_equiv Unif true
+      else
 	let u1 = Sorts.univ_of_sort s1 and u2 = Sorts.univ_of_sort s2 in
-	if UGraph.check_leq univs u1 u2 then true
+	if UGraph.check_leq univs u1 u2 then bool_to_equiv Yes true
 	else
-	  (cstrs := Univ.enforce_leq u1 u2 !cstrs; 
-	   true)
+	  (cstrs := Univ.enforce_leq u1 u2 !cstrs;
+	   bool_to_equiv Yes true)
     in
-    let rec eq_constr' m n = 
-      m == n ||	compare_head_gen eq_universes eq_sorts eq_constr' m n
+    let rec eq_constr' m n =
+      if m == n then Unif
+      else
+        compare_head_gen_equiv eq_universes eq_sorts eq_constr' m n
     in
     let rec compare_leq m n =
-      compare_head_gen_leq eq_universes leq_sorts eq_constr' leq_constr' m n
-    and leq_constr' m n = m == n || compare_leq m n in
+      compare_head_gen_leq_equiv eq_universes leq_sorts eq_constr' leq_constr' m n
+    and leq_constr' m n =
+      if m == n then Unif
+      else compare_leq m n in
     let res = compare_leq m n in
-    res, !cstrs
+    equiv_to_bool res, !cstrs
 
 let always_true _ _ = true
 
-let rec eq_constr_nounivs m n =
-  (m == n) || compare_head_gen (fun _ -> always_true) always_true eq_constr_nounivs m n
+let eq_constr_nounivs =
+  let rec eq_constr_nounivs m n =
+    if m == n then Unif
+    else
+      compare_head_gen_equiv (fun _ a b -> bool_to_equiv Yes true)
+        (fun a b -> bool_to_equiv Yes true) eq_constr_nounivs m n
+  in fun a b -> equiv_to_bool (eq_constr_nounivs a b)
 
 (** We only use this function over blocks! *)
 let tag t = Obj.tag (Obj.repr t)

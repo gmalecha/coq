@@ -186,6 +186,10 @@ $(LIBCOQRUN): kernel/byterun/coq_jumptbl.h $(BYTERUN)
 	cd $(dir $(LIBCOQRUN)) && \
 	$(OCAMLFIND) ocamlmklib -oc $(COQRUN) $(foreach u,$(BYTERUN),$(notdir $(u)))
 
+$(LIBHASHCONS): $(HASHCONS_FILES)
+	cd $(dir $(LIBHASHCONS)) && \
+	$(OCAMLFIND) ocamlmklib -oc $(HASHCONS) $(foreach u,$(HASHCONS_FILES),$(notdir $(u)))
+
 #coq_jumptbl.h is required only if you have GCC 2.0 or later
 kernel/byterun/coq_jumptbl.h : kernel/byterun/coq_instruct.h
 	sed -n -e '/^  /s/ \([A-Z]\)/ \&\&coq_lbl_\1/gp' \
@@ -282,7 +286,7 @@ miniopt: $(COQTOPEXE) pluginsopt
 minibyte: $(COQTOPBYTE) pluginsbyte
 
 ifeq ($(BEST),opt)
-$(COQTOPEXE): $(COQMKTOP) $(LINKCMX) $(LIBCOQRUN) $(TOPLOOPCMA:.cma=.cmxs)
+$(COQTOPEXE): $(COQMKTOP) $(LINKCMX) $(LIBCOQRUN) $(LIBHASHCONS) $(TOPLOOPCMA:.cma=.cmxs)
 	$(SHOW)'COQMKTOP -o $@'	
 	$(HIDE)$(COQMKTOP) -boot -opt $(OPTFLAGS) $(LINKMETADATA) -thread -o $@
 	$(STRIP) $@
@@ -292,7 +296,7 @@ $(COQTOPEXE): $(COQTOPBYTE)
 	cp $< $@
 endif
 
-$(COQTOPBYTE): $(COQMKTOP) $(LINKCMO) $(LIBCOQRUN) $(TOPLOOPCMA)
+$(COQTOPBYTE): $(COQMKTOP) $(LINKCMO) $(LIBCOQRUN) $(LIBHASHCONS) $(TOPLOOPCMA)
 	$(SHOW)'COQMKTOP -o $@'	
 	$(HIDE)$(COQMKTOP) -boot -top $(BYTEFLAGS) -thread -o $@
 
@@ -321,7 +325,7 @@ $(COQMKTOP): $(patsubst %.cma,%$(BESTLIB),$(COQMKTOPCMO:.cmo=$(BESTOBJ)))
 
 tools/tolink.ml: Makefile.build Makefile.common
 	$(SHOW)"ECHO... >" $@
-	$(HIDE)echo "let copts = \"-cclib -lcoqrun\"" > $@
+	$(HIDE)echo "let copts = \"-cclib -lcoqrun -cclib -llhashcons\"" > $@
 	$(HIDE)echo "let core_libs = \""$(LINKCMO)"\"" >> $@
 	$(HIDE)echo "let core_objs = \""$(OBJSMOD)"\"" >> $@
 
@@ -964,12 +968,12 @@ $(OCAMLDOCDIR)/%.pdf: $(OCAMLDOCDIR)/%.tex
 ### Special rules
 ###########################################################################
 
-dev/printers.cma: dev/printers.mllib
+dev/printers.cma: $(LIBHASHCONS) dev/printers.mllib
 	$(SHOW)'Testing $@'
-	$(HIDE)$(OCAMLC) $(MLINCLUDES) $(BYTEFLAGS) -thread $(SYSCMA) $(P4CMA) $(filter-out %.mllib, $^) -o test-printer
+	$(HIDE)$(OCAMLC) $(MLINCLUDES) $(BYTEFLAGS) $(LIBHASHCONS) -thread $(SYSCMA) $(P4CMA) $(filter-out %.mllib, $^) -o test-printer
 	@rm -f test-printer
 	$(SHOW)'OCAMLC -a $@'   
-	$(HIDE)$(OCAMLC) $(MLINCLUDES) $(BYTEFLAGS) -thread $(SYSCMA) $(P4CMA) $(filter-out %.mllib, $^) -linkall -a -o $@
+	$(HIDE)$(OCAMLC) $(MLINCLUDES) $(BYTEFLAGS) $(LIBHASHCONS) -thread $(SYSCMA) $(P4CMA) $(filter-out %.mllib, $^) -linkall -a -o $@
 
 ide/coqide_main.ml: ide/coqide_main.ml4 config/Makefile # no camlp4deps here
 	$(SHOW)'CAMLP4O   $<'

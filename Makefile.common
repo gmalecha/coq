@@ -63,7 +63,8 @@ CSDPCERT:=plugins/micromega/csdpcert$(EXE)
 CORESRCDIRS:=\
   config 	lib		kernel		kernel/byterun	library \
   proofs 	tactics 	pretyping	interp		stm \
-  toplevel	parsing 	printing	intf	engine	ltac
+  toplevel	parsing 	printing	intf	engine	ltac \
+  kernel/lhashcons
 
 PLUGINS:=\
   omega		romega 		micromega 	quote \
@@ -158,6 +159,12 @@ DLLCOQRUN:=$(dir $(LIBCOQRUN))dll$(COQRUN)$(DLLEXT)
 
 BYTERUN:=$(addprefix kernel/byterun/, \
   coq_fix_code.o coq_memory.o coq_values.o coq_interp.o )
+
+HASHCONS := lhashcons
+LIBHASHCONS:=kernel/lhashcons/lib$(HASHCONS).a
+DLLHASHCONS:=$(dir $(LIBHASHCONS))dll$(HASHCONS)$(DLLEXT)
+HASHCONS_FILES:=$(addprefix kernel/lhashcons/, unify.o)
+
 
 # LINK ORDER:
 # Beware that highparsing.cma should appear before ltac.cma

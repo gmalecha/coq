@@ -77,6 +77,7 @@ let std_includes basedir =
    "-I"; rebase "lib";
    "-I"; rebase "toplevel";
    "-I"; rebase "kernel/byterun";
+   "-I"; rebase "kernel/lhashcons";
    "-I"; Envars.camlp4lib () ] @
   (if is_ocaml4 then ["-I"; "+compiler-libs"] else [])
 
